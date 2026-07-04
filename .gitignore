@@ -1,0 +1,13 @@
+.venv/
+.repo/
+__pycache__/
+*.pyc
+*.log
+.pytest_cache/
+storage/uploads/
+storage/outputs/
+backend/storage/
+node_modules/
+dist/
+.env
+.env.local
