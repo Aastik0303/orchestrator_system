@@ -20,7 +20,7 @@ CODE_HINTS = {
     "react",
     "sql",
 }
-DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".md", ".txt"}
+DOCUMENT_EXTENSIONS = {".pdf", ".docx", ".md", ".txt"}
 DATA_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 
 
@@ -47,4 +47,3 @@ def choose_agent(request: ChatRequest) -> AgentName:
         return AgentName.DEEP_RESEARCH
 
     return AgentName.GENERAL_CHAT
-

@@ -13,9 +13,13 @@ load_dotenv(ROOT_DIR / "backend" / ".env")
 class Settings(BaseModel):
     groq_api_key: str | None = os.getenv("GROQ_API_KEY")
     groq_model: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    postgres_url: str | None = (
+        os.getenv("POSTGRES_URL")
+        or os.getenv("POSTGRES_CHECKPOINTER_URI")
+        or os.getenv("DATABASE_URL")
+    )
 
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

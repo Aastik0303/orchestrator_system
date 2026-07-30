@@ -1,9 +1,22 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.orchestrator.langgraph_flow import initialize_graph, shutdown_graph
 from app.routes.chat import router as chat_router
 
-app = FastAPI(title="Multi-Agent Orchestrator", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await initialize_graph()
+    try:
+        yield
+    finally:
+        await shutdown_graph()
+
+
+app = FastAPI(title="Multi-Agent Orchestrator", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -19,4 +32,3 @@ app.include_router(chat_router, prefix="/api")
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
-

@@ -24,6 +24,7 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
     deep_research: bool = False
     agent_override: AgentName = AgentName.AUTO
+    session_id: str | None = None
     files: list[UploadedFile] = Field(default_factory=list)
 
 
@@ -32,4 +33,3 @@ class AgentResponse(BaseModel):
     response: str
     artifacts: list[dict[str, Any]] = Field(default_factory=list)
     needs_clarification: bool = False
-

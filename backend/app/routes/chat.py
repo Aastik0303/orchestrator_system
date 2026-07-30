@@ -4,7 +4,7 @@ from uuid import uuid4
 from fastapi import APIRouter, File, Form, UploadFile
 
 from app.models import AgentName, ChatRequest, UploadedFile
-from app.orchestrator.supervisor import dispatch
+from app.orchestrator.langgraph_flow import run_orchestrator
 
 router = APIRouter(tags=["chat"])
 
@@ -17,6 +17,7 @@ async def chat(
     message: str = Form(...),
     deep_research: bool = Form(False),
     agent_override: AgentName = Form(AgentName.AUTO),
+    session_id: str | None = Form(None),
     files: list[UploadFile] = File(default=[]),
 ):
     uploaded_files: list[UploadedFile] = []
@@ -38,7 +39,7 @@ async def chat(
         message=message,
         deep_research=deep_research,
         agent_override=agent_override,
+        session_id=session_id,
         files=uploaded_files,
     )
-    return dispatch(request)
-
+    return await run_orchestrator(request)

@@ -179,6 +179,7 @@ function App() {
     form.append("message", message);
     form.append("deep_research", String(deepResearch));
     form.append("agent_override", agentOverride);
+    form.append("session_id", activeSession.id);
 
     Array.from(files ?? []).forEach((file) => form.append("files", file));
 

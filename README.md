@@ -34,7 +34,10 @@ Put your Groq key in the root `.env` file:
 ```env
 GROQ_API_KEY=gsk_your_key_here
 GROQ_MODEL=llama-3.3-70b-versatile
+POSTGRES_URL=postgresql://postgres:postgres@localhost:5432/orchestrator?sslmode=disable
 ```
+
+`POSTGRES_URL` enables LangGraph's PostgreSQL checkpointer. `POSTGRES_CHECKPOINTER_URI` or `DATABASE_URL` can be used instead. If no Postgres URL is set, the backend uses an in-memory checkpointer for local development.
 
 ### Frontend
 
@@ -51,3 +54,5 @@ Open the Vite URL shown in the terminal, usually `http://localhost:5173`.
 - The Data Analyst agent never mutates uploaded source files. It writes derived outputs into `backend/storage/outputs`.
 - The RAG and research integrations are scaffolded with clean interfaces so API providers can be added without changing the supervisor contract.
 - Manual agent override is supported from the frontend and respected by the backend router.
+- The chat API invokes a compiled LangGraph workflow: router, selected agent, validation, retry, fallback, and final response.
+- The high-level planned orchestrator flow is documented in [docs/orchestrator-flow.md](docs/orchestrator-flow.md).
