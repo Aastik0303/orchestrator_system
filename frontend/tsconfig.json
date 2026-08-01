@@ -9,12 +9,20 @@
     "allowSyntheticDefaultImports": true,
     "strict": true,
     "forceConsistentCasingInFileNames": true,
+    "ignoreDeprecations": "6.0",
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "react-router-dom": ["src/lib/router.tsx"],
+      "@tanstack/react-query": ["src/lib/reactQuery.tsx"],
+      "framer-motion": ["src/lib/motion.tsx"]
+    }
   },
   "include": ["src"],
   "references": []

@@ -5,10 +5,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.orchestrator.langgraph_flow import initialize_graph, shutdown_graph
 from app.routes.chat import router as chat_router
+from app.services.chat_store import initialize_chat_store
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    initialize_chat_store()
     await initialize_graph()
     try:
         yield
