@@ -1,23 +1,11 @@
-from app.agents.code_dev import code_dev_agent
-from app.agents.data_analyst import data_analyst_agent
-from app.agents.document_rag import document_rag_agent
-from app.agents.general_chat import deep_research_agent, general_chat_agent
-from app.agents.youtube_rag import youtube_rag_agent
-from app.models import AgentName, AgentResponse, ChatRequest
-from app.orchestrator.router import choose_agent
+"""Backward-compatible view of the task agents.
 
-AGENTS = {
-    AgentName.GENERAL_CHAT: general_chat_agent,
-    AgentName.DEEP_RESEARCH: deep_research_agent,
-    AgentName.DOCUMENT_RAG: document_rag_agent,
-    AgentName.YOUTUBE_RAG: youtube_rag_agent,
-    AgentName.CODE_DEV: code_dev_agent,
-    AgentName.DATA_ANALYST: data_analyst_agent,
-}
+Dispatch is driven by the Agent Registry (`app.agents.registry`); this mapping
+is derived from it rather than hard-coded.
+"""
+
+from app.agents.catalog import load_agents
 
 
-def dispatch(request: ChatRequest) -> AgentResponse:
-    active_agent = choose_agent(request)
-    handler = AGENTS[active_agent]
-    return handler(request)
-
+def task_agents() -> dict[str, object]:
+    return {spec.name: spec.handler for spec in load_agents().all(category="task")}

@@ -1,61 +1,87 @@
-import { motion } from 'framer-motion'
-import { Bot, Server } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Bot, Brain, Gauge, Server, ShieldCheck, Wrench } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { useRuntimeSnapshot } from '@/hooks/useRuntimeSnapshot'
+import { getAgentCapabilities, type AgentCapability } from '@/services/apiClient'
+
+const groups: Array<{ id: AgentCapability['category']; title: string; icon: typeof Bot }> = [
+  { id: 'system', title: 'System Agents', icon: Brain },
+  { id: 'task', title: 'Task Agents', icon: Bot },
+  { id: 'output', title: 'Output and Quality Agents', icon: ShieldCheck },
+]
 
 export function AgentsPage() {
-  const { snapshot, error } = useRuntimeSnapshot()
-  const capabilities = snapshot?.capabilities ?? []
+  const [agents, setAgents] = useState<AgentCapability[]>([])
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    getAgentCapabilities()
+      .then(result => {
+        setAgents(result.agents)
+        setError(null)
+      })
+      .catch(caught => setError(caught instanceof Error ? caught.message : 'Could not load agents.'))
+  }, [])
 
   return (
     <div className="space-y-6 p-6">
       <div>
         <h2 className="text-2xl font-bold text-surface-900 dark:text-white">Agents</h2>
-        <p className="mt-1 text-sm text-surface-500 dark:text-surface-400">Actual agents and services exposed by the running backend.</p>
+        <p className="mt-1 text-sm text-surface-500 dark:text-surface-400">Backend agent registry and measured runtime activity.</p>
       </div>
 
       {error && <EmptyState title="Could not load backend capabilities" description={error} icon={<Server className="h-5 w-5" />} />}
 
-      {capabilities.length === 0 ? (
-        <Card>
-          <CardContent>
-            <EmptyState title="No backend agents reported" description="Start the backend to load available agents." icon={<Bot className="h-5 w-5" />} />
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {capabilities.map((capability, index) => (
-            <motion.div
-              key={capability.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.05 }}
-            >
-              <Card hover>
-                <CardContent className="p-5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-50 dark:bg-green-900/20">
-                        <Bot className="h-5 w-5 text-green-600" />
-                      </div>
+      {groups.map(group => {
+        const GroupIcon = group.icon
+        const groupedAgents = agents.filter(agent => agent.category === group.id)
+        if (!groupedAgents.length) return null
+        return (
+          <section key={group.id} className="agent-capability-section">
+            <div className="capability-section-heading">
+              <GroupIcon className="h-5 w-5" />
+              <h3>{group.title}</h3>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {groupedAgents.map(agent => (
+                <Card key={agent.id} hover>
+                  <CardContent className="p-5">
+                    <div className="capability-card-heading">
+                      <div className="capability-icon"><GroupIcon className="h-5 w-5" /></div>
                       <div>
-                        <h3 className="font-semibold text-surface-900 dark:text-white">{capability.name}</h3>
-                        <p className="text-xs text-surface-500">{capability.id}</p>
+                        <h4>{agent.name}</h4>
+                        <span>{agent.user_selectable ? 'User selectable' : 'System managed'}</span>
                       </div>
+                      <Badge variant={agent.status === 'available' ? 'success' : 'warning'}>{agent.status}</Badge>
                     </div>
-                    <Badge variant="success">{capability.status}</Badge>
-                  </div>
+                    <p className="capability-description">{agent.description}</p>
+                    <dl className="capability-metrics">
+                      <div><dt>Model</dt><dd>{agent.model}</dd></div>
+                      <div><dt>Capabilities</dt><dd>{(agent.capabilities ?? []).join(', ') || '-'}</dd></div>
+                      <div><dt>Timeout</dt><dd>{agent.timeout_seconds ?? '-'} s</dd></div>
+                      <div><dt>Retries</dt><dd>{agent.retry_policy?.max_retries ?? 0}</dd></div>
+                      <div><dt>Token budget</dt><dd>{agent.token_budget ?? 0}</dd></div>
+                      <div><dt>Permissions</dt><dd>{(agent.permissions ?? []).join(', ') || 'none'}</dd></div>
+                      <div><dt>Memory</dt><dd>{agent.memory_access}</dd></div>
+                      <div><dt>Runs</dt><dd>{agent.run_count}</dd></div>
+                      <div><dt>Success</dt><dd>{agent.success_rate == null ? 'No data' : `${agent.success_rate}%`}</dd></div>
+                      <div><dt>Latency</dt><dd>{agent.average_latency_ms == null ? 'No data' : `${agent.average_latency_ms} ms`}</dd></div>
+                    </dl>
+                    <div className="capability-tools">
+                      <Wrench className="h-4 w-4" />
+                      <span>{agent.tools.length ? agent.tools.join(', ') : 'No external tools'}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </section>
+        )
+      })}
 
-                  <div className="mt-4 text-xs text-surface-500">
-                    Loaded from backend runtime capability registry.
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          ))}
-        </div>
+      {!error && agents.length === 0 && (
+        <Card><CardContent><EmptyState title="No backend agents reported" description="Start the backend to load the agent registry." icon={<Gauge className="h-5 w-5" />} /></CardContent></Card>
       )}
     </div>
   )

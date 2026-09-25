@@ -1,0 +1,106 @@
+# Local production-like stack.
+#   docker compose up --build                      # API + UI + Postgres + Redis
+#   docker compose --profile workers up --build    # + dedicated background workers
+#
+# Secrets come from .env (never committed). POSTGRES_PASSWORD must be set.
+x-backend-env: &backend-env
+  APP_ENV: ${APP_ENV:-development}
+  AUTH_MODE: ${AUTH_MODE:-dev}
+  API_KEYS: ${API_KEYS:-}
+  DATABASE_URL: postgresql+psycopg://orchestrator:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/orchestrator
+  REDIS_URL: redis://redis:6379/0
+  STORAGE_ROOT: /app/storage
+  WORKER_MODE: ${WORKER_MODE:-inprocess}
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: orchestrator
+      POSTGRES_USER: orchestrator
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/001-vector.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orchestrator -d orchestrator"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    # Ephemeral use only (cache, rate limits): no persistence needed.
+    command: redis-server --save "" --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file: .env
+    environment: *backend-env
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file: .env
+    environment: *backend-env
+    volumes:
+      - backend_storage:/app/storage
+    ports:
+      - "8002:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    profiles: ["workers"]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file: .env
+    environment:
+      <<: *backend-env
+      WORKER_MODE: external
+    command: ["python", "-m", "app.workers.runner", "--concurrency", "4"]
+    # Workers serve no HTTP: healthy while the claim loop keeps its heartbeat fresh.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(0 if time.time() - os.path.getmtime('/tmp/orchestrator-worker.heartbeat') < 30 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - backend_storage:/app/storage
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    deploy:
+      replicas: 2
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_BASE_URL: ""
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  backend_storage:

@@ -1,0 +1,78 @@
+{
+  "label": "after-final-docker-pg-llm0",
+  "app_dir": "backend",
+  "fake_llm_latency_ms": 0,
+  "workers": 1,
+  "replicas": 1,
+  "database": "sqlite",
+  "python": "3.13.0",
+  "platform": "win32",
+  "cpu_count": 16,
+  "recorded_at": "2026-09-25T17:08:37Z",
+  "messages": [
+    "hello, what can you help me with?",
+    "Write a python function that parses ISO dates and explain it",
+    "Research current vector database trends and compare the options",
+    "Analyze this repository architecture and research current patterns, then create a report"
+  ],
+  "levels": [
+    {
+      "concurrency": 1,
+      "requests": 20,
+      "successes": 20,
+      "errors": {},
+      "error_rate": 0.0,
+      "p50_ms": 74.7,
+      "p95_ms": 112.8,
+      "p99_ms": 112.8,
+      "mean_ms": 79.8,
+      "max_ms": 112.8,
+      "throughput_rps": 12.53,
+      "wall_seconds": 1.6
+    },
+    {
+      "concurrency": 10,
+      "requests": 20,
+      "successes": 20,
+      "errors": {},
+      "error_rate": 0.0,
+      "p50_ms": 639.4,
+      "p95_ms": 1021.2,
+      "p99_ms": 1021.2,
+      "mean_ms": 664.5,
+      "max_ms": 1021.2,
+      "throughput_rps": 14.05,
+      "wall_seconds": 1.42
+    },
+    {
+      "concurrency": 25,
+      "requests": 50,
+      "successes": 50,
+      "errors": {},
+      "error_rate": 0.0,
+      "p50_ms": 1627.3,
+      "p95_ms": 2519.2,
+      "p99_ms": 2611.1,
+      "mean_ms": 1728.3,
+      "max_ms": 2611.1,
+      "throughput_rps": 13.35,
+      "wall_seconds": 3.74
+    },
+    {
+      "concurrency": 50,
+      "requests": 100,
+      "successes": 57,
+      "errors": {
+        "http_429": 43
+      },
+      "error_rate": 0.43,
+      "p50_ms": 3481.6,
+      "p95_ms": 4186.4,
+      "p99_ms": 4250.9,
+      "mean_ms": 3260.7,
+      "max_ms": 4250.9,
+      "throughput_rps": 12.99,
+      "wall_seconds": 4.39
+    }
+  ]
+}

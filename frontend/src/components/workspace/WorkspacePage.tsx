@@ -1,17 +1,22 @@
-import { Bot, CheckCircle, CircleAlert, Clock, Database, FileText, GitBranch, Maximize2, MessageSquarePlus, Plus, RefreshCw, Route, Search, Send, Table, User, X } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent } from 'react'
+import { Bot, Brain, CircleAlert, Clock, Database, FileText, GitBranch, Maximize2, MessageSquarePlus, Plus, RefreshCw, Route, Search, Send, ShieldCheck, Table, Trash2, User, Wrench, X } from 'lucide-react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { Background, Controls, Handle, MarkerType, MiniMap, Position, ReactFlow, useEdgesState, useNodesState, type Edge, type Node, type NodeProps, type ReactFlowInstance } from '@xyflow/react'
+import '@xyflow/react/dist/style.css'
+import 'highlight.js/styles/github-dark.css'
 import { Button } from '@/components/ui/Button'
-import { createInitialWorkflowRun } from '@/services/mockWorkflowEvents'
 import {
+  deleteChatSession,
+  getRun,
   getBackendHealth,
   getChatMessages,
   getChatSessions,
-  sendChatMessage,
+  startChatRun,
+  subscribeToRun,
   uploadKnowledgeDocuments,
-  type BackendAgentName,
+  type BackendWorkflowEvent,
   type ChatSession,
 } from '@/services/apiClient'
-import type { NodeStatus, WorkflowEdge, WorkflowEvent, WorkflowNodeData, WorkflowRunState } from '@/types/workflow'
+import type { NodeStatus, WorkflowEvent, WorkflowNodeData, WorkflowRunState } from '@/types/workflow'
 
 type ChatMessage = {
   role: 'assistant' | 'user'
@@ -20,13 +25,16 @@ type ChatMessage = {
 }
 
 const starterMessages: ChatMessage[] = []
+const MarkdownMessage = lazy(() => import('@/components/chat/MarkdownMessage').then(module => ({ default: module.MarkdownMessage })))
 
 export function WorkspacePage() {
   const [draft, setDraft] = useState('')
   const [messages, setMessages] = useState(starterMessages)
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
   const [chatStackError, setChatStackError] = useState<string | null>(null)
+  const [pendingRunFiles, setPendingRunFiles] = useState<File[]>([])
   const [workflowOpen, setWorkflowOpen] = useState(false)
   const [workflowFitRequest, setWorkflowFitRequest] = useState(0)
   const [showWorkflowJson, setShowWorkflowJson] = useState(false)
@@ -40,12 +48,11 @@ export function WorkspacePage() {
   }))
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking')
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const runTimersRef = useRef<number[]>([])
+  const messagesViewportRef = useRef<HTMLDivElement>(null)
+  const runSocketRef = useRef<WebSocket | null>(null)
   const selectedNode = useMemo(() => run.nodes.find(node => node.id === selectedNodeId) ?? run.nodes[run.nodes.length - 1], [run.nodes, selectedNodeId])
 
-  useEffect(() => () => {
-    runTimersRef.current.forEach(timer => window.clearTimeout(timer))
-  }, [])
+  useEffect(() => () => runSocketRef.current?.close(), [])
 
   useEffect(() => {
     getBackendHealth()
@@ -56,6 +63,16 @@ export function WorkspacePage() {
   useEffect(() => {
     loadChatStack()
   }, [])
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      messagesViewportRef.current?.scrollTo({
+        top: messagesViewportRef.current.scrollHeight,
+        behavior: 'smooth',
+      })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [messages])
 
   async function loadChatStack(selectSessionId?: string) {
     try {
@@ -89,6 +106,7 @@ export function WorkspacePage() {
     setMessages([])
     setActiveSessionId(null)
     setChatStackError(null)
+    setPendingRunFiles([])
   }
 
   async function handleSelectChat(sessionId: string) {
@@ -96,11 +114,40 @@ export function WorkspacePage() {
     await loadSessionMessages(sessionId)
   }
 
+  async function handleDeleteChat(sessionId: string) {
+    const session = chatSessions.find(item => item.id === sessionId)
+    if (!window.confirm(`Delete "${session?.title || 'this chat'}" and all of its messages?`)) return
+
+    setDeletingSessionId(sessionId)
+    setChatStackError(null)
+    try {
+      await deleteChatSession(sessionId)
+      const result = await getChatSessions()
+      setBackendStatus('connected')
+      setChatSessions(result.sessions)
+
+      if (activeSessionId === sessionId) {
+        const nextSessionId = result.sessions[0]?.id || null
+        setActiveSessionId(nextSessionId)
+        if (nextSessionId) {
+          await loadSessionMessages(nextSessionId)
+        } else {
+          setMessages([])
+        }
+      }
+    } catch (error) {
+      setChatStackError(error instanceof Error ? error.message : 'Could not delete the chat.')
+    } finally {
+      setDeletingSessionId(null)
+    }
+  }
+
   async function handleFileUpload(files: FileList | null) {
     if (!files?.length) return
 
     const uploadFiles = Array.from(files)
     const documentList = uploadFiles.map(file => file.name).join(', ')
+    setPendingRunFiles(uploadFiles)
     setMessages(currentMessages => [
       ...currentMessages,
       {
@@ -117,7 +164,7 @@ export function WorkspacePage() {
         ...currentMessages,
         {
           role: 'assistant',
-          text: `${result.documents.length === 1 ? 'Document is' : 'Documents are'} stored in backend Knowledge and available in the Knowledge page.`,
+          text: `${result.documents.length === 1 ? 'Document is' : 'Documents are'} stored in backend Knowledge and attached to the next task.`,
         },
       ])
     } catch (error) {
@@ -137,123 +184,60 @@ export function WorkspacePage() {
     const task = draft.trim()
     if (!task) return
 
-    runTimersRef.current.forEach(timer => window.clearTimeout(timer))
-    runTimersRef.current = []
-
-    const nextRun = createInitialWorkflowRun(task)
+    runSocketRef.current?.close()
+    const attachedFiles = pendingRunFiles
+    const attachmentName = attachedFiles.map(file => file.name).join(', ')
     setDraft('')
     setWorkflowOpen(true)
-    setSelectedNodeId('input')
-    setRun(nextRun)
+    setSelectedNodeId(null)
     setMessages(currentMessages => [
       ...currentMessages,
-      { role: 'user', text: task },
-      { role: 'assistant', text: 'Backend run started. Routing request through the orchestrator and waiting for the selected agent response.' },
+      { role: 'user', text: task, attachmentName: attachmentName || undefined },
+      { role: 'assistant', text: 'Workflow started. Live agent events will appear in the canvas.' },
     ])
-
-    playBackendLifecycle(task, 0)
 
     try {
       setBackendStatus('connected')
-      const response = await sendChatMessage({ message: task, files: [], sessionId: activeSessionId || undefined })
-      const sessionId = response.session_id || activeSessionId
-      if (sessionId) setActiveSessionId(sessionId)
-      completeBackendRun(response.active_agent, response.response)
-      setMessages(currentMessages => [
-        ...currentMessages,
-        { role: 'assistant', text: response.response },
-      ])
-      await loadChatStack(sessionId || undefined)
+      const started = await startChatRun({ message: task, files: attachedFiles, sessionId: activeSessionId || undefined })
+      setPendingRunFiles([])
+      setActiveSessionId(started.session_id)
+      setRun({ id: started.run_id, status: 'queued', nodes: [], edges: [], events: [] })
+      let finalized = false
+      const finalizeRun = async () => {
+        if (finalized) return
+        finalized = true
+        try {
+          const completedRun = await getRun(started.run_id)
+          setRun(currentRun => ({
+            ...currentRun,
+            status: normalizeNodeStatus(completedRun.status),
+            reportPreview: completedRun.response,
+            evaluationScore: completedRun.evaluation?.overall_score,
+          }))
+          await loadChatStack(started.session_id)
+        } catch (error) {
+          setChatStackError(error instanceof Error ? error.message : 'Could not load the completed run.')
+        }
+      }
+      runSocketRef.current = subscribeToRun(
+        started.run_id,
+        event => {
+          if (event.type === 'stream_closed') return
+          setRun(currentRun => applyBackendWorkflowEvent(currentRun, event))
+          if (event.node_id) setSelectedNodeId(event.node_id)
+        },
+        finalizeRun,
+        () => setBackendStatus('disconnected'),
+      )
     } catch (error) {
       setBackendStatus('disconnected')
       const message = error instanceof Error ? error.message : 'Backend request failed.'
-      failBackendRun(message)
+      setRun(currentRun => ({ ...currentRun, status: 'failed' }))
       setMessages(currentMessages => [
         ...currentMessages,
         { role: 'assistant', text: `Backend error: ${message}` },
       ])
     }
-  }
-
-  function scheduleRunUpdate(delay: number, update: (currentRun: WorkflowRunState) => WorkflowRunState) {
-    const timer = window.setTimeout(() => setRun(update), delay)
-    runTimersRef.current.push(timer)
-  }
-
-  function playBackendLifecycle(task: string, fileCount: number) {
-    const routerNode = makeWorkflowNode({
-      id: 'router',
-      label: 'Supervisor Router',
-      category: 'Backend LangGraph',
-      nodeType: 'logic',
-      status: 'running',
-      lane: 1,
-      row: 2,
-      icon: Route,
-      inputSummary: task,
-      outputSummary: fileCount > 0 ? `${fileCount} file(s) included for routing.` : 'Choosing best agent.',
-    })
-    const validationNode = makeWorkflowNode({
-      id: 'validation',
-      label: 'Validation',
-      category: 'Backend Guardrail',
-      nodeType: 'logic',
-      status: 'queued',
-      lane: 1,
-      row: 4,
-      icon: CheckCircle,
-      outputSummary: 'Waiting for agent output.',
-    })
-
-    scheduleRunUpdate(120, runState => addNodesAndEdges(runState, [routerNode], [{ from: 'input', to: 'router' }], 'Backend router started.', 'running', 'router'))
-    scheduleRunUpdate(650, runState => updateNode(runState, 'router', { status: 'completed', durationMs: 520, outputSummary: 'Agent route selected by backend.' }))
-    scheduleRunUpdate(760, runState => addNodesAndEdges(runState, [validationNode], [], 'Validation node queued.', 'queued', 'validation'))
-  }
-
-  function completeBackendRun(activeAgent: BackendAgentName, responseText: string) {
-    const agentNode = backendAgentNode(activeAgent)
-    const finalNode = makeWorkflowNode({
-      id: 'final',
-      label: 'Final Response',
-      category: 'Backend Output',
-      nodeType: 'output',
-      status: 'completed',
-      lane: 1,
-      row: 5,
-      icon: FileText,
-      durationMs: 80,
-      outputSummary: responseText,
-    })
-
-    setRun(runState => {
-      let nextRun = addNodesAndEdges(
-        runState,
-        [{ ...agentNode, status: 'completed', outputSummary: `Backend returned ${activeAgent}.` }, finalNode],
-        [
-          { from: 'router', to: agentNode.id },
-          { from: agentNode.id, to: 'validation' },
-          { from: 'validation', to: 'final' },
-        ],
-        `Backend selected ${agentNode.label}.`,
-        'completed',
-        agentNode.id
-      )
-      nextRun = updateNode(nextRun, 'validation', { status: 'completed', durationMs: 120, outputSummary: 'Response passed validation.' })
-      return {
-        ...nextRun,
-        status: 'completed',
-        reportPreview: responseText,
-        events: [makeWorkflowEvent('Real backend response received and rendered.', 'completed', 'final'), ...nextRun.events],
-      }
-    })
-  }
-
-  function failBackendRun(error: string) {
-    setRun(runState => ({
-      ...updateNode(runState, 'router', { status: 'failed', error, outputSummary: error }),
-      status: 'failed',
-      events: [makeWorkflowEvent('Backend connection failed.', 'failed', 'router'), ...runState.events],
-    }))
   }
 
   return (
@@ -276,14 +260,25 @@ export function WorkspacePage() {
                 <div className="chat-stack-empty">No saved chats yet.</div>
               ) : (
                 chatSessions.map(session => (
-                  <button
+                  <div
                     key={session.id}
                     className={`chat-stack-item ${activeSessionId === session.id ? 'chat-stack-item-active' : ''}`}
-                    onClick={() => handleSelectChat(session.id)}
                   >
-                    <strong>{session.title}</strong>
-                    <span>{session.message_count} messages</span>
-                  </button>
+                    <button className="chat-stack-select" type="button" onClick={() => handleSelectChat(session.id)}>
+                      <strong>{session.title}</strong>
+                      <span>{session.message_count} messages</span>
+                    </button>
+                    <button
+                      className="chat-stack-delete"
+                      type="button"
+                      title={`Delete ${session.title}`}
+                      aria-label={`Delete ${session.title}`}
+                      disabled={deletingSessionId === session.id}
+                      onClick={() => handleDeleteChat(session.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
                 ))
               )
               }
@@ -322,7 +317,7 @@ export function WorkspacePage() {
             </div>
             <span className="connection-pill">Live</span>
           </div>
-          <div className="workspace-messages">
+          <div className="workspace-messages" ref={messagesViewportRef}>
             {messages.length === 0 ? (
               <div className="conversation-empty">
                 <Bot className="h-5 w-5" />
@@ -337,15 +332,17 @@ export function WorkspacePage() {
                   <div className="workspace-avatar">
                     {message.role === 'assistant' ? <Bot className="h-4 w-4" /> : <User className="h-4 w-4" />}
                   </div>
-                  <p>
-                    {message.text}
+                  <div className="workspace-message-content">
+                    <Suspense fallback={<span>{message.text}</span>}>
+                      <MarkdownMessage content={message.text} />
+                    </Suspense>
                     {message.attachmentName && (
                       <span className="message-attachment">
                         <FileText className="h-4 w-4" />
                         {message.attachmentName}
                       </span>
                     )}
-                  </p>
+                  </div>
                 </div>
               ))
             )}
@@ -417,7 +414,7 @@ export function WorkspacePage() {
           className="doc-upload-input"
           type="file"
           multiple
-          accept=".pdf,.txt,.md,.doc,.docx,.csv,.json,.html"
+          accept=".pdf,.docx,.txt,.md,.csv,.xlsx,.xls"
           onChange={event => {
             handleFileUpload(event.target.files)
             event.target.value = ''
@@ -442,72 +439,91 @@ export function WorkspacePage() {
   )
 }
 
-function makeWorkflowNode(node: WorkflowNodeData): WorkflowNodeData {
-  return { retryCount: 0, ...node }
+function normalizeNodeStatus(status?: string | null): NodeStatus {
+  const validStatuses: NodeStatus[] = ['idle', 'queued', 'running', 'completed', 'failed', 'retrying', 'skipped', 'waiting_for_approval', 'cancelled']
+  // Backend step states that have no direct canvas equivalent.
+  if (status === 'blocked') return 'skipped'
+  if (status === 'timeout') return 'failed'
+  return validStatuses.includes(status as NodeStatus) ? status as NodeStatus : 'running'
 }
 
-function backendAgentNode(activeAgent: BackendAgentName): WorkflowNodeData {
-  const config: Record<BackendAgentName, Pick<WorkflowNodeData, 'label' | 'icon' | 'category' | 'lane'>> = {
-    auto: { label: 'Auto Router', icon: Route, category: 'Backend Router', lane: 1 },
-    general_chat: { label: 'General Chat Agent', icon: Bot, category: 'Backend Agent', lane: 1 },
-    deep_research: { label: 'Deep Research Agent', icon: Search, category: 'Backend Agent', lane: 1 },
-    document_rag: { label: 'Document RAG Agent', icon: FileText, category: 'Backend Agent', lane: 1 },
-    youtube_rag: { label: 'YouTube RAG Agent', icon: Search, category: 'Backend Agent', lane: 1 },
-    code_dev: { label: 'Code Development Agent', icon: GitBranch, category: 'Backend Agent', lane: 1 },
-    data_analyst: { label: 'Data Analyst Agent', icon: Table, category: 'Backend Agent', lane: 1 },
+function workflowIcon(event: BackendWorkflowEvent) {
+  const agent = String(event.details?.agent || '')
+  if (event.node_type === 'input') return User
+  if (event.node_type === 'output') return FileText
+  if (event.node_type === 'tool') return Wrench
+  if (agent === 'memory' || event.node_id?.includes('memory')) return Brain
+  if (agent === 'planner' || event.node_id === 'planner') return Route
+  if (agent === 'evaluation' || event.node_id?.includes('evaluation')) return ShieldCheck
+  if (agent === 'report_generator' || event.node_id?.includes('report')) return FileText
+  if (agent === 'code_dev') return GitBranch
+  if (agent === 'data_analyst' || agent === 'sql_agent') return Table
+  if (agent === 'document_rag') return Database
+  if (agent === 'deep_research' || agent === 'youtube_rag') return Search
+  if (event.node_type === 'logic') return Route
+  return Bot
+}
+
+function applyBackendWorkflowEvent(run: WorkflowRunState, event: BackendWorkflowEvent): WorkflowRunState {
+  const details = event.details || {}
+  const nodeId = event.node_id || undefined
+  const status = normalizeNodeStatus(event.status)
+  const dependencies = Array.isArray(details.depends_on) ? details.depends_on.filter((item): item is string => typeof item === 'string') : []
+  let nodes = run.nodes
+  let edges = run.edges
+
+  if (nodeId) {
+    const currentNode = nodes.find(node => node.id === nodeId)
+    const dependencyRows = dependencies.map(id => nodes.find(node => node.id === id)?.row ?? -1)
+    const row = currentNode?.row ?? Math.max(0, ...dependencyRows) + 1
+    const lanePeers = nodes.filter(node => node.row === row && node.id !== nodeId)
+    const nodeUpdate: WorkflowNodeData = {
+      id: nodeId,
+      label: event.label || currentNode?.label || nodeId.replace(/_/g, ' '),
+      category: event.node_type ? `${event.node_type[0].toUpperCase()}${event.node_type.slice(1)} node` : currentNode?.category || 'Workflow node',
+      nodeType: ['input', 'agent', 'tool', 'logic', 'output'].includes(event.node_type || '') ? event.node_type as WorkflowNodeData['nodeType'] : currentNode?.nodeType || 'logic',
+      status,
+      lane: currentNode?.lane ?? Math.min(3, lanePeers.length),
+      row,
+      icon: currentNode?.icon || workflowIcon(event),
+      model: typeof details.model === 'string' ? details.model : currentNode?.model,
+      toolName: typeof details.tool === 'string' ? details.tool : currentNode?.toolName,
+      durationMs: typeof details.duration_ms === 'number' ? details.duration_ms : currentNode?.durationMs,
+      retryCount: typeof details.retry_count === 'number' ? details.retry_count : currentNode?.retryCount || 0,
+      inputSummary: typeof details.input === 'string' ? details.input : currentNode?.inputSummary,
+      outputSummary: typeof details.output === 'string' ? details.output : currentNode?.outputSummary,
+      error: typeof details.error === 'string' ? details.error : currentNode?.error,
+      metrics: {
+        ...currentNode?.metrics,
+        score: typeof details.evaluation_score === 'number' ? details.evaluation_score : currentNode?.metrics?.score,
+      },
+    }
+    nodes = currentNode ? nodes.map(node => node.id === nodeId ? nodeUpdate : node) : [...nodes, nodeUpdate]
+    const edgeKeys = new Set(edges.map(edge => `${edge.from}:${edge.to}`))
+    const nextEdges = dependencies
+      .filter(dependency => dependency !== nodeId && !edgeKeys.has(`${dependency}:${nodeId}`))
+      .map(dependency => ({ from: dependency, to: nodeId }))
+    edges = [...edges, ...nextEdges]
   }
-  const agent = config[activeAgent]
-  return makeWorkflowNode({
-    id: `agent_${activeAgent}`,
-    label: agent.label,
-    category: agent.category,
-    nodeType: 'agent',
-    status: 'running',
-    lane: agent.lane,
-    row: 3,
-    icon: agent.icon,
-    model: activeAgent === 'auto' ? undefined : 'backend selected',
-  })
-}
 
-function addNodesAndEdges(
-  run: WorkflowRunState,
-  nodes: WorkflowNodeData[],
-  edges: WorkflowEdge[],
-  eventMessage: string,
-  eventStatus: NodeStatus,
-  eventNodeId?: string
-): WorkflowRunState {
-  const existingNodeIds = new Set(run.nodes.map(node => node.id))
-  const existingEdges = new Set(run.edges.map(edge => `${edge.from}-${edge.to}`))
-  return {
-    ...run,
-    nodes: [...run.nodes, ...nodes.filter(node => !existingNodeIds.has(node.id))],
-    edges: [...run.edges, ...edges.filter(edge => !existingEdges.has(`${edge.from}-${edge.to}`))],
-    events: [makeWorkflowEvent(eventMessage, eventStatus, eventNodeId), ...run.events],
-  }
-}
-
-function updateNode(run: WorkflowRunState, nodeId: string, update: Partial<WorkflowNodeData>): WorkflowRunState {
-  return {
-    ...run,
-    nodes: run.nodes.map(node => node.id === nodeId ? { ...node, ...update } : node),
-    events: [makeWorkflowEvent(`${nodeId} ${(update.status || 'updated').replace(/_/g, ' ')}.`, update.status || 'running', nodeId), ...run.events],
-  }
-}
-
-function makeWorkflowEvent(message: string, status: NodeStatus, nodeId?: string): WorkflowEvent {
-  return {
-    id: `evt_${Date.now()}_${Math.random().toString(16).slice(2)}`,
-    time: new Date().toLocaleTimeString(),
+  const workflowEvent: WorkflowEvent = {
+    id: event.id || `evt_${event.sequence || Date.now()}`,
+    time: event.timestamp ? new Date(event.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString(),
     nodeId,
-    message,
+    message: `${event.label || nodeId || 'Workflow'}: ${event.type.replace(/_/g, ' ')}`,
     status,
   }
+  const terminalStatus = event.type === 'workflow_completed' ? 'completed' : event.type === 'workflow_failed' || event.type === 'workflow_timeout' || event.type === 'workflow_blocked' ? 'failed' : event.type === 'workflow_cancelled' ? 'cancelled' : run.status === 'queued' ? 'running' : run.status
+  return {
+    ...run,
+    status: terminalStatus,
+    nodes,
+    edges,
+    events: [workflowEvent, ...run.events],
+    reportPreview: event.type === 'workflow_completed' && typeof details.output === 'string' ? details.output : run.reportPreview,
+    evaluationScore: typeof details.evaluation_score === 'number' ? details.evaluation_score : run.evaluationScore,
+  }
 }
-
-const workflowNodeWidth = 220
-const workflowNodeHeight = 72
 
 type WorkflowNodePosition = {
   x: number
@@ -521,13 +537,6 @@ function getDefaultNodePosition(node: WorkflowNodeData): WorkflowNodePosition {
   }
 }
 
-function getDefaultNodePositions(nodes: WorkflowNodeData[]) {
-  return nodes.reduce<Record<string, WorkflowNodePosition>>((positions, node) => {
-    positions[node.id] = getDefaultNodePosition(node)
-    return positions
-  }, {})
-}
-
 function WorkflowCanvas({
   run,
   selectedNodeId,
@@ -539,122 +548,89 @@ function WorkflowCanvas({
   fitRequest: number
   onSelectNode: (nodeId: string) => void
 }) {
-  const [nodePositions, setNodePositions] = useState<Record<string, WorkflowNodePosition>>({})
-  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null)
-  const canvasRef = useRef<HTMLDivElement>(null)
-  const lastFitRequestRef = useRef(fitRequest)
-  const dragRef = useRef<{
-    nodeId: string
-    startX: number
-    startY: number
-    origin: WorkflowNodePosition
-  } | null>(null)
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node<WorkflowFlowNodeData>>([])
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+  const flowRef = useRef<ReactFlowInstance<Node<WorkflowFlowNodeData>, Edge> | null>(null)
 
   useEffect(() => {
-    setNodePositions(currentPositions => {
-      const nextPositions: Record<string, WorkflowNodePosition> = {}
-      run.nodes.forEach(node => {
-        nextPositions[node.id] = currentPositions[node.id] || getDefaultNodePosition(node)
+    setNodes(currentNodes => {
+      const currentById = new Map(currentNodes.map(node => [node.id, node]))
+      return run.nodes.map(workflowNode => {
+        const current = currentById.get(workflowNode.id)
+        return {
+          id: workflowNode.id,
+          type: 'workflowNode',
+          position: current?.position || getDefaultNodePosition(workflowNode),
+          data: { workflowNode },
+          sourcePosition: Position.Bottom,
+          targetPosition: Position.Top,
+          selected: workflowNode.id === selectedNodeId,
+        }
       })
-      return nextPositions
     })
-  }, [run.id, run.nodes])
+    setEdges(run.edges.map(edge => ({
+      id: `${edge.from}-${edge.to}`,
+      source: edge.from,
+      target: edge.to,
+      type: 'smoothstep',
+      animated: run.nodes.find(node => node.id === edge.to)?.status === 'running',
+      markerEnd: { type: MarkerType.ArrowClosed, color: '#2563eb', width: 18, height: 18 },
+      style: { stroke: 'var(--app-primary)', strokeWidth: 2.4 },
+      interactionWidth: 20,
+      className: 'workflow-flow-edge',
+    })))
+  }, [run.id, run.nodes, run.edges, selectedNodeId, setEdges, setNodes])
 
   useEffect(() => {
-    if (fitRequest === lastFitRequestRef.current) return
-
-    lastFitRequestRef.current = fitRequest
-    dragRef.current = null
-    setDraggingNodeId(null)
-    setNodePositions(getDefaultNodePositions(run.nodes))
-    window.requestAnimationFrame(() => {
-      canvasRef.current?.scrollTo({ left: 0, top: 0, behavior: 'smooth' })
-    })
-  }, [fitRequest, run.nodes])
-
-  function getNodePosition(node: WorkflowNodeData) {
-    return nodePositions[node.id] || getDefaultNodePosition(node)
-  }
-
-  function handlePointerDown(event: PointerEvent<HTMLButtonElement>, node: WorkflowNodeData) {
-    if (event.button !== 0) return
-
-    const position = getNodePosition(node)
-    dragRef.current = {
-      nodeId: node.id,
-      startX: event.clientX,
-      startY: event.clientY,
-      origin: position,
-    }
-    setDraggingNodeId(node.id)
-    onSelectNode(node.id)
-    event.currentTarget.setPointerCapture(event.pointerId)
-  }
-
-  function handlePointerMove(event: PointerEvent<HTMLButtonElement>) {
-    const drag = dragRef.current
-    if (!drag) return
-
-    const nextX = Math.max(16, drag.origin.x + event.clientX - drag.startX)
-    const nextY = Math.max(16, drag.origin.y + event.clientY - drag.startY)
-    setNodePositions(currentPositions => ({
-      ...currentPositions,
-      [drag.nodeId]: { x: nextX, y: nextY },
-    }))
-  }
-
-  function handlePointerEnd(event: PointerEvent<HTMLButtonElement>) {
-    if (!dragRef.current) return
-
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId)
-    }
-    dragRef.current = null
-    setDraggingNodeId(null)
-  }
+    flowRef.current?.fitView({ padding: 0.22, duration: 350 })
+  }, [fitRequest])
 
   return (
-    <div className="workflow-canvas" ref={canvasRef}>
-      <svg className="workflow-lines" viewBox="0 0 1120 820" aria-hidden="true">
-        {run.edges.map(edge => {
-          const fromNode = run.nodes.find(node => node.id === edge.from)
-          const toNode = run.nodes.find(node => node.id === edge.to)
-          if (!fromNode || !toNode) return null
-          const fromPosition = getNodePosition(fromNode)
-          const toPosition = getNodePosition(toNode)
-          const fromX = fromPosition.x + workflowNodeWidth / 2
-          const fromY = fromPosition.y + workflowNodeHeight
-          const toX = toPosition.x + workflowNodeWidth / 2
-          const toY = toPosition.y
-          const midY = (fromY + toY) / 2
-          return <path key={`${edge.from}-${edge.to}`} d={`M${fromX} ${fromY} C${fromX} ${midY} ${toX} ${midY} ${toX} ${toY}`} />
-        })}
-      </svg>
-      {run.nodes.map(node => {
-        const Icon = node.icon
-        const position = getNodePosition(node)
-        return (
-          <button
-            key={node.id}
-            className={`workflow-node workflow-node-${node.status} ${selectedNodeId === node.id ? 'workflow-node-selected' : ''} ${draggingNodeId === node.id ? 'workflow-node-dragging' : ''}`}
-            style={{ '--node-x': `${position.x}px`, '--node-y': `${position.y}px` } as CSSProperties}
-            onPointerDown={event => handlePointerDown(event, node)}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerEnd}
-            onPointerCancel={handlePointerEnd}
-          >
-            <span className="node-icon"><Icon className="h-4 w-4" /></span>
-            <span className="node-copy">
-              <strong>{node.label}</strong>
-              <small>{node.outputSummary || node.inputSummary || node.category}</small>
-            </span>
-            <span className="node-status">
-              {node.status === 'running' ? <Clock className="h-3 w-3" /> : node.status === 'retrying' ? <RefreshCw className="h-3 w-3" /> : node.status === 'failed' ? <CircleAlert className="h-3 w-3" /> : null}
-              {node.status}
-            </span>
-          </button>
-        )
-      })}
+    <div className="workflow-canvas">
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={workflowNodeTypes}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onNodeClick={(_event, node) => onSelectNode(node.id)}
+        onInit={instance => { flowRef.current = instance }}
+        fitView
+        fitViewOptions={{ padding: 0.22 }}
+        minZoom={0.25}
+        maxZoom={1.8}
+        nodesDraggable
+        panOnDrag
+        zoomOnScroll
+      >
+        <Background gap={28} size={1} />
+        <MiniMap pannable zoomable className="workflow-minimap" />
+        <Controls showInteractive={false} />
+      </ReactFlow>
+    </div>
+  )
+}
+
+type WorkflowFlowNodeData = { workflowNode: WorkflowNodeData }
+
+const workflowNodeTypes = { workflowNode: WorkflowFlowNode }
+
+function WorkflowFlowNode({ data, selected }: NodeProps<Node<WorkflowFlowNodeData>>) {
+  const node = data.workflowNode
+  const Icon = node.icon
+  return (
+    <div className={`workflow-flow-node workflow-flow-node-${node.status} ${selected ? 'workflow-flow-node-selected' : ''}`}>
+      <Handle type="target" position={Position.Top} className="workflow-flow-handle" isConnectable={false} />
+      <span className="node-icon"><Icon className="h-4 w-4" /></span>
+      <span className="node-copy">
+        <strong>{node.label}</strong>
+        <small>{node.outputSummary || node.inputSummary || node.category}</small>
+      </span>
+      <span className="node-status">
+        {node.status === 'running' ? <Clock className="h-3 w-3" /> : node.status === 'retrying' ? <RefreshCw className="h-3 w-3" /> : node.status === 'failed' ? <CircleAlert className="h-3 w-3" /> : null}
+        {node.status}
+      </span>
+      <Handle type="source" position={Position.Bottom} className="workflow-flow-handle" isConnectable={false} />
     </div>
   )
 }

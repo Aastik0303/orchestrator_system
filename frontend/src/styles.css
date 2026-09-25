@@ -1485,9 +1485,11 @@ input:focus-visible,
 
 .workspace-page {
   container-type: inline-size;
-  min-height: calc(100vh - 72px);
+  height: calc(100dvh - 72px);
+  min-height: 0;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
+  overflow: hidden;
   background:
     radial-gradient(circle at 50% -8rem, color-mix(in srgb, var(--app-primary) 10%, transparent), transparent 34rem),
     var(--app-bg);
@@ -1502,13 +1504,17 @@ input:focus-visible,
   justify-content: center;
   align-items: stretch;
   gap: 18px;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .workspace-left-rail {
   position: sticky;
   top: 96px;
   min-width: 0;
-  height: min(720px, calc(100vh - 124px));
+  height: 100%;
+  min-height: 0;
   display: grid;
   grid-template-rows: minmax(260px, 1fr) auto;
   gap: 18px;
@@ -1528,7 +1534,8 @@ input:focus-visible,
 
 .conversation-panel {
   width: 100%;
-  min-height: min(720px, calc(100vh - 124px));
+  height: 100%;
+  min-height: 0;
 }
 
 .workflow-panel {
@@ -1622,8 +1629,47 @@ input:focus-visible,
 
 .chat-stack-item {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.chat-stack-select {
+  min-width: 0;
+  display: grid;
   gap: 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 10px;
+  text-align: left;
   cursor: pointer;
+}
+
+.chat-stack-delete {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--app-text-muted);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, opacity 150ms ease;
+}
+
+.chat-stack-delete:hover,
+.chat-stack-delete:focus-visible {
+  background: color-mix(in srgb, var(--app-red) 12%, transparent);
+  color: var(--app-red);
+}
+
+.chat-stack-delete:disabled {
+  cursor: wait;
+  opacity: 0.45;
 }
 
 .chat-stack-item:hover,
@@ -1970,6 +2016,10 @@ input:focus-visible,
 .workspace-messages {
   padding: 26px clamp(22px, 4vw, 54px);
   align-content: start;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .workspace-message {
@@ -2073,6 +2123,31 @@ input:focus-visible,
   background: var(--app-primary-soft);
   color: var(--app-primary);
 }
+
+.knowledge-document-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.knowledge-document-actions button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--app-border);
+  border-radius: 7px;
+  background: var(--app-surface-raised);
+  color: var(--app-text-muted);
+  cursor: pointer;
+}
+
+.knowledge-document-actions button:hover {
+  border-color: var(--app-border-strong);
+  color: var(--app-primary);
+}
+
+.knowledge-document-actions button:last-child:hover { color: var(--app-red); }
 
 .empty-state,
 .conversation-empty {
@@ -2444,8 +2519,21 @@ input:focus-visible,
     justify-self: end;
   }
 
+  .workspace-page {
+    height: auto;
+    min-height: calc(100dvh - 72px);
+    overflow: visible;
+  }
+
   .workspace-split {
     grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
+  }
+
+  .workspace-left-rail {
+    position: static;
+    height: auto;
   }
 
   .workflow-mini-card {
@@ -2462,7 +2550,8 @@ input:focus-visible,
   }
 
   .conversation-panel {
-    min-height: min(640px, calc(100vh - 250px));
+    height: min(640px, calc(100dvh - 250px));
+    min-height: 420px;
   }
 
   .workspace-composer {
@@ -2513,4 +2602,398 @@ input:focus-visible,
     scroll-behavior: auto !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/* Structured chat output */
+.workspace-message-content {
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-surface-raised);
+  padding: 13px 15px;
+  line-height: 1.55;
+  box-shadow: var(--app-shadow-sm);
+  overflow-wrap: anywhere;
+}
+
+.workspace-message-user .workspace-message-content {
+  grid-column: 1;
+  grid-row: 1;
+  background: var(--app-primary-soft);
+}
+
+.markdown-message > :first-child { margin-top: 0; }
+.markdown-message > :last-child { margin-bottom: 0; }
+
+.markdown-message h1,
+.markdown-message h2,
+.markdown-message h3,
+.markdown-message h4 {
+  margin: 1.15em 0 0.45em;
+  color: var(--app-text);
+  letter-spacing: 0;
+  line-height: 1.25;
+}
+
+.markdown-message h1 { font-size: 20px; }
+.markdown-message h2 { font-size: 17px; }
+.markdown-message h3,
+.markdown-message h4 { font-size: 14px; }
+
+.markdown-message p,
+.markdown-message ul,
+.markdown-message ol,
+.markdown-message blockquote,
+.markdown-message table,
+.markdown-message pre {
+  margin: 0.65em 0;
+}
+
+.workspace-message-content .markdown-message p {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  box-shadow: none;
+}
+
+.dark .workspace-message-content .markdown-message p {
+  border: 0;
+  background: transparent;
+}
+
+.markdown-message ul,
+.markdown-message ol { padding-left: 22px; }
+.markdown-message li + li { margin-top: 4px; }
+
+.markdown-message a {
+  color: var(--app-primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.markdown-message blockquote {
+  border-left: 3px solid var(--app-yellow);
+  background: color-mix(in srgb, var(--app-yellow) 9%, transparent);
+  color: var(--app-text-muted);
+  padding: 8px 12px;
+}
+
+.markdown-message code:not(pre code) {
+  border-radius: 5px;
+  background: var(--app-surface-muted);
+  padding: 2px 5px;
+  color: var(--app-purple);
+  font-size: 0.9em;
+}
+
+.markdown-message pre {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid var(--app-border-strong);
+  border-radius: 8px;
+  background: #0d1117;
+  padding: 13px;
+  color: #e6edf3;
+}
+
+.markdown-message table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.markdown-message th,
+.markdown-message td {
+  border: 1px solid var(--app-border);
+  padding: 7px 9px;
+  text-align: left;
+}
+
+.markdown-message th { background: var(--app-surface-muted); }
+
+/* React Flow live execution canvas */
+.workflow-canvas {
+  padding: 0;
+  overflow: hidden;
+}
+
+.workflow-canvas::before { display: none; }
+
+.workflow-canvas .react-flow {
+  width: 100%;
+  height: 100%;
+  min-height: 500px;
+  background: var(--app-bg);
+}
+
+.workflow-canvas .react-flow__background pattern line {
+  stroke: var(--app-border);
+}
+
+.workflow-flow-node {
+  --node-color: var(--app-text-muted);
+  position: relative;
+  width: 220px;
+  min-height: 72px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  border: 1px solid color-mix(in srgb, var(--node-color) 56%, var(--app-border));
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--node-color) 8%, transparent), transparent),
+    var(--app-surface-raised);
+  color: var(--app-text);
+  padding: 9px;
+  box-shadow: var(--app-shadow-sm);
+  transition: box-shadow 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.workflow-flow-node-running { --node-color: var(--app-primary); }
+.workflow-flow-node-completed { --node-color: var(--app-green); }
+.workflow-flow-node-retrying,
+.workflow-flow-node-waiting_for_approval { --node-color: var(--app-yellow); }
+.workflow-flow-node-failed,
+.workflow-flow-node-cancelled { --node-color: var(--app-red); }
+
+.workflow-flow-node-selected {
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--node-color) 24%, transparent),
+    var(--app-shadow-md);
+}
+
+.workflow-flow-node .node-icon {
+  background: color-mix(in srgb, var(--node-color) 14%, transparent);
+  color: var(--node-color);
+}
+
+.workflow-flow-node .node-status {
+  color: var(--node-color);
+  background: color-mix(in srgb, var(--node-color) 12%, transparent);
+}
+
+.workflow-flow-handle {
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--app-surface-raised);
+  background: var(--app-primary);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--app-primary) 68%, var(--app-border));
+}
+
+.workflow-canvas .workflow-flow-edge .react-flow__edge-path {
+  stroke: var(--app-primary) !important;
+  stroke-width: 2.4 !important;
+}
+
+.workflow-canvas .workflow-flow-edge .react-flow__edge-interaction {
+  stroke-width: 20;
+}
+
+.workflow-canvas .arrowclosed {
+  fill: var(--app-primary);
+  stroke: var(--app-primary);
+}
+
+.workflow-canvas .react-flow__edge.animated path {
+  stroke-dasharray: 7 6;
+  animation: dash-flow 2.4s linear infinite;
+}
+
+.workflow-canvas .react-flow__controls,
+.workflow-minimap {
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-surface-raised);
+  box-shadow: var(--app-shadow-md);
+}
+
+.workflow-canvas .react-flow__controls-button {
+  border-color: var(--app-border);
+  background: var(--app-surface-raised);
+  color: var(--app-text);
+}
+
+/* Capability registry pages */
+.agent-capability-section,
+.mcp-server-section {
+  display: grid;
+  gap: 14px;
+}
+
+.capability-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--app-text);
+}
+
+.capability-section-heading h3,
+.capability-section-heading span,
+.capability-card-heading h4,
+.capability-card-heading span,
+.mcp-tool-heading h4,
+.mcp-tool-heading span {
+  margin: 0;
+}
+
+.capability-section-heading h3,
+.capability-card-heading h4,
+.mcp-tool-heading h4 { font-size: 14px; }
+
+.capability-section-heading span,
+.capability-card-heading span,
+.mcp-tool-heading span {
+  color: var(--app-text-muted);
+  font-size: 11px;
+}
+
+.capability-card-heading,
+.mcp-tool-heading {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.capability-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  background: var(--app-primary-soft);
+  color: var(--app-primary);
+}
+
+.capability-description {
+  min-height: 42px;
+  margin: 14px 0;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.capability-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-border);
+}
+
+.capability-metrics div {
+  min-width: 0;
+  background: var(--app-surface-muted);
+  padding: 8px;
+}
+
+.capability-metrics dt {
+  color: var(--app-text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.capability-metrics dd {
+  overflow: hidden;
+  margin: 2px 0 0;
+  color: var(--app-text);
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.capability-tools {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 12px;
+  color: var(--app-text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.capability-tools svg { flex: 0 0 auto; }
+
+.mcp-server-list { display: grid; gap: 22px; }
+
+.mcp-server-section {
+  border-top: 1px solid var(--app-border);
+  padding-top: 16px;
+}
+
+.mcp-server-header,
+.mcp-server-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mcp-server-actions { justify-content: flex-end; }
+
+.mcp-test-button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--app-border);
+  border-radius: 7px;
+  background: var(--app-surface-raised);
+  color: var(--app-text);
+  padding: 0 10px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.mcp-tool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(310px, 100%), 1fr));
+  gap: 12px;
+}
+
+.mcp-tool-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: var(--app-text-muted);
+  font-size: 10px;
+}
+
+.mcp-tool-stats span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.spin-icon { animation: spin 1s linear infinite; }
+
+@media (min-width: 1280px) {
+  .xl\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 640px) {
+  .capability-card-heading,
+  .mcp-tool-heading { grid-template-columns: 34px minmax(0, 1fr); }
+  .capability-card-heading .ui-badge,
+  .mcp-tool-heading .ui-badge { grid-column: 1 / -1; justify-self: start; }
+  .mcp-server-header { align-items: flex-start; }
+  .mcp-server-actions { flex-direction: column; align-items: flex-end; }
+}
+
+.route-loading {
+  min-height: calc(100vh - 72px);
+  display: grid;
+  place-items: center;
+  color: var(--app-text-muted);
+  font-size: 13px;
 }

@@ -1,4 +1,4 @@
-import { BarChart3, Bell, BookOpen, Bot, FileText, History, Home, MessageSquare, Moon, Play, Settings, Sun } from 'lucide-react'
+import { BarChart3, Bell, BookOpen, Bot, FileText, History, Home, MessageSquare, Moon, Play, Settings, Sun, Wrench } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/useAppStore'
 import { cn } from '@/lib/utils'
@@ -8,6 +8,7 @@ const navItems = [
   { path: '/workspace', label: 'Workspace', icon: MessageSquare },
   { path: '/knowledge', label: 'Knowledge', icon: BookOpen },
   { path: '/agents', label: 'Agents', icon: Bot },
+  { path: '/tools', label: 'Tools', icon: Wrench },
   { path: '/runs', label: 'Runs', icon: History },
   { path: '/reports', label: 'Reports', icon: FileText },
   { path: '/evaluations', label: 'Evaluations', icon: BarChart3 },

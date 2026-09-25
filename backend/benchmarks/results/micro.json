@@ -1,0 +1,59 @@
+{
+  "recorded_at": "2026-09-25T16:53:09Z",
+  "platform": "win32",
+  "python": "3.13.0",
+  "dag_parallelism": {
+    "parallel": {
+      "median_ms": 343.4,
+      "runs": 5
+    },
+    "sequential": {
+      "median_ms": 644.5,
+      "runs": 5
+    },
+    "speedup": 1.88
+  },
+  "vector_search": [
+    {
+      "chunks": 1000,
+      "legacy_python_ms": 164.6,
+      "numpy_blob_ms_including_db": 5.3,
+      "speedup": 30.9
+    },
+    {
+      "chunks": 5000,
+      "legacy_python_ms": 810.6,
+      "numpy_blob_ms_including_db": 27.6,
+      "speedup": 29.4
+    },
+    {
+      "chunks": 20000,
+      "legacy_python_ms": 3270.9,
+      "numpy_blob_ms_including_db": 111.1,
+      "speedup": 29.4
+    }
+  ],
+  "postgres_vector_search": [
+    {
+      "chunks": 1000,
+      "postgres_numpy_ms": 26.7,
+      "postgres_pgvector_ms": 10.5,
+      "speedup": 2.5,
+      "same_top1": true
+    },
+    {
+      "chunks": 5000,
+      "postgres_numpy_ms": 106.4,
+      "postgres_pgvector_ms": 7.2,
+      "speedup": 14.8,
+      "same_top1": true
+    },
+    {
+      "chunks": 20000,
+      "postgres_numpy_ms": 484.4,
+      "postgres_pgvector_ms": 8.1,
+      "speedup": 59.8,
+      "same_top1": true
+    }
+  ]
+}

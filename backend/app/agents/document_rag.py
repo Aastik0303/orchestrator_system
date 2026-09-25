@@ -1,75 +1,60 @@
-from pathlib import Path
+from __future__ import annotations
 
-from docx import Document
-from pypdf import PdfReader
-
-from app.models import AgentName, AgentResponse, ChatRequest
-from app.services.groq_client import groq_completion
-
-MAX_CONTEXT_CHARS = 18000
+from app.agents.context import AgentContext
+from app.agents.registry import ModelPolicy, PermissionPolicy, RetryPolicy, RoutingHints, register_agent
+from app.models import AgentResult, AgentTask, SourceReference
+from app.rag.workflow import rag_graph_metadata, run_document_rag
 
 
-def _extract_text(path: Path) -> str:
-    suffix = path.suffix.lower()
-
-    if suffix == ".docx":
-        document = Document(path)
-        return "\n".join(paragraph.text for paragraph in document.paragraphs if paragraph.text.strip())
-
-    if suffix == ".pdf":
-        reader = PdfReader(path)
-        return "\n".join(page.extract_text() or "" for page in reader.pages)
-
-    if suffix in {".txt", ".md"}:
-        return path.read_text(encoding="utf-8", errors="ignore")
-
-    return ""
-
-
-def document_rag_agent(request: ChatRequest) -> AgentResponse:
-    contexts: list[str] = []
-    skipped: list[str] = []
-
-    for uploaded in request.files:
-        if not uploaded.storage_path:
-            skipped.append(uploaded.name)
-            continue
-
-        path = Path(uploaded.storage_path)
-        text = _extract_text(path).strip()
-
-        if text:
-            contexts.append(f"File: {uploaded.name}\n{text[:MAX_CONTEXT_CHARS]}")
-        else:
-            skipped.append(uploaded.name)
-
-    if not contexts:
-        return AgentResponse(
-            active_agent=AgentName.DOCUMENT_RAG,
-            response=(
-                "Document RAG Agent active, but I could not extract readable text from the uploaded file. "
-                "Try a .docx, .pdf, .txt, or .md file."
-            ),
+@register_agent(
+    name="document_rag",
+    description="Runs a LangGraph retrieval workflow over the caller's indexed documents with citations.",
+    capabilities=["document_retrieval"],
+    tools=["vector.search_chunks"],
+    timeout_seconds=60,
+    retry_policy=RetryPolicy(max_retries=1),
+    model_policy=ModelPolicy(tier="quality", temperature=0.1, max_output_tokens=1200),
+    token_budget=8000,
+    permission_policy=PermissionPolicy(granted_permissions={"vector:read"}),
+    routing_hints={
+        "document_retrieval": RoutingHints(
+            description="Answer questions from the user's uploaded documents.",
+            file_extensions={".pdf", ".docx", ".md", ".txt"},
         )
-
-    answer = groq_completion(
-        (
-            "You are the Document RAG Agent. Answer the user's question using only the uploaded "
-            "document context. If the answer is not present, say that the document does not contain it."
-        ),
-        f"User question: {request.message}\n\nDocument context:\n\n{'\n\n---\n\n'.join(contexts)}",
-    )
-
-    if answer:
-        return AgentResponse(active_agent=AgentName.DOCUMENT_RAG, response=answer)
-
-    file_names = ", ".join(file.name for file in request.files)
-    skipped_note = f" Skipped unreadable files: {', '.join(skipped)}." if skipped else ""
-    return AgentResponse(
-        active_agent=AgentName.DOCUMENT_RAG,
-        response=(
-            "Document RAG Agent extracted readable text from "
-            f"{file_names}, but GROQ_API_KEY is not available to generate an answer."
-            f"{skipped_note}"
-        ),
+    },
+)
+async def document_rag(task: AgentTask, ctx: AgentContext) -> AgentResult:
+    document_ids = [file.document_id for file in task.files if file.document_id]
+    state = await run_document_rag(task.goal, document_ids, ctx)
+    context_chunks = state.get("context_chunks", [])
+    sources = [
+        SourceReference(
+            title=chunk["document_name"],
+            source_type="document",
+            document_id=chunk["document_id"],
+            page=chunk.get("page_number"),
+            chunk_id=chunk["id"],
+        )
+        for chunk in context_chunks
+    ]
+    findings = []
+    if context_chunks:
+        similarities = [chunk.get("similarity", 0.0) for chunk in context_chunks]
+        findings.append(
+            f"Retrieved {len(context_chunks)} chunks with similarity scores from "
+            f"{min(similarities):.2f} to {max(similarities):.2f}."
+        )
+    return AgentResult(
+        summary=state["answer"],
+        findings=findings,
+        sources=sources,
+        warnings=state.get("warnings", []),
+        metadata={
+            **rag_graph_metadata(),
+            "retrieved_chunks": len(context_chunks),
+            "quarantined_or_filtered": len(state.get("retrieved_chunks", [])) - len(state.get("safe_chunks", [])),
+            "generation_mode": state.get("generation_mode", "unknown"),
+            "faithfulness": state.get("faithfulness"),
+            "tool_success": True,
+        },
     )

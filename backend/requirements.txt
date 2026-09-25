@@ -1,14 +1,22 @@
+# Runtime dependencies (keep in sync with imports; dev/test tools live in requirements-dev.txt)
 fastapi>=0.115,<1.0
 uvicorn[standard]>=0.32,<1.0
 python-multipart>=0.0.19,<1.0
+python-dotenv>=1.0,<2.0
 pydantic>=2.10,<3.0
+numpy>=2.0,<3.0
 pandas>=2.3,<4.0
 openpyxl>=3.1,<4.0
 httpx>=0.28,<1.0
-langchain>=0.3,<1.0
-langgraph>=0.2,<1.0
-langgraph-checkpoint-postgres>=2.0,<4.0
-psycopg[binary,pool]>=3.2,<4.0
+langchain-core>=0.3,<2.0
+langchain-text-splitters>=0.3,<2.0
+langchain-huggingface>=0.1,<2.0
+langgraph>=0.6,<2.0
 groq>=0.13,<1.0
 python-docx>=1.1,<2.0
 pypdf>=5.0,<7.0
+sqlalchemy>=2.0,<3.0
+psycopg[binary,pool]>=3.2,<4.0
+alembic>=1.14,<2.0
+redis>=5.2,<7.0
+sentence-transformers>=5.2,<6.0

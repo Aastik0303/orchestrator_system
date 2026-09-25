@@ -1,0 +1,76 @@
+{
+  "label": "after-final-pg-llm0-r4",
+  "app_dir": "backend",
+  "fake_llm_latency_ms": 0,
+  "workers": 1,
+  "replicas": 4,
+  "database": "postgresql",
+  "python": "3.13.0",
+  "platform": "win32",
+  "cpu_count": 16,
+  "recorded_at": "2026-09-25T16:57:35Z",
+  "messages": [
+    "hello, what can you help me with?",
+    "Write a python function that parses ISO dates and explain it",
+    "Research current vector database trends and compare the options",
+    "Analyze this repository architecture and research current patterns, then create a report"
+  ],
+  "levels": [
+    {
+      "concurrency": 1,
+      "requests": 20,
+      "successes": 20,
+      "errors": {},
+      "error_rate": 0.0,
+      "p50_ms": 44.5,
+      "p95_ms": 62.2,
+      "p99_ms": 62.2,
+      "mean_ms": 48.2,
+      "max_ms": 62.2,
+      "throughput_rps": 20.74,
+      "wall_seconds": 0.96
+    },
+    {
+      "concurrency": 10,
+      "requests": 20,
+      "successes": 20,
+      "errors": {},
+      "error_rate": 0.0,
+      "p50_ms": 149.6,
+      "p95_ms": 309.1,
+      "p99_ms": 309.1,
+      "mean_ms": 170.0,
+      "max_ms": 309.1,
+      "throughput_rps": 52.2,
+      "wall_seconds": 0.38
+    },
+    {
+      "concurrency": 25,
+      "requests": 50,
+      "successes": 50,
+      "errors": {},
+      "error_rate": 0.0,
+      "p50_ms": 386.3,
+      "p95_ms": 948.8,
+      "p99_ms": 1033.1,
+      "mean_ms": 432.8,
+      "max_ms": 1033.1,
+      "throughput_rps": 43.29,
+      "wall_seconds": 1.16
+    },
+    {
+      "concurrency": 50,
+      "requests": 100,
+      "successes": 100,
+      "errors": {},
+      "error_rate": 0.0,
+      "p50_ms": 739.0,
+      "p95_ms": 1919.2,
+      "p99_ms": 2073.0,
+      "mean_ms": 838.8,
+      "max_ms": 2073.0,
+      "throughput_rps": 47.6,
+      "wall_seconds": 2.1
+    }
+  ]
+}

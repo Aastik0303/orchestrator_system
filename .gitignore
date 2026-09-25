@@ -6,8 +6,13 @@ __pycache__/
 .pytest_cache/
 storage/uploads/
 storage/outputs/
+storage/runtime.db*
 backend/storage/
 node_modules/
 dist/
 .env
 .env.local
+backend/benchmarks/results/*-scratch*.json
+backend/evals/results/*.tmp
+*.db-wal
+*.db-shm

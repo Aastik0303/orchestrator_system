@@ -2,20 +2,30 @@ import { Badge } from '@/components/ui/Badge'
 
 const labels: Record<string, string> = {
   completed: 'Completed',
+  success: 'Success',
   running: 'Running',
-  failed: 'Failed',
+  queued: 'Queued',
+  retrying: 'Retrying',
   pending: 'Pending',
+  failed: 'Failed',
+  timeout: 'Timeout',
+  blocked: 'Blocked',
+  cancelled: 'Cancelled',
   approval_required: 'Approval',
 }
 
-export function StatusBadge({ status }: { status: string }) {
-  const variant = status === 'completed'
-    ? 'success'
-    : status === 'failed'
-      ? 'danger'
-      : status === 'running'
-        ? 'warning'
-        : 'neutral'
+const variants: Record<string, 'success' | 'danger' | 'warning' | 'neutral'> = {
+  completed: 'success',
+  success: 'success',
+  running: 'warning',
+  queued: 'warning',
+  retrying: 'warning',
+  failed: 'danger',
+  timeout: 'danger',
+  blocked: 'danger',
+}
 
-  return <Badge variant={variant}>{labels[status] || status}</Badge>
+export function StatusBadge({ status }: { status: string }) {
+  const key = status.toLowerCase()
+  return <Badge variant={variants[key] ?? 'neutral'}>{labels[key] || status}</Badge>
 }
