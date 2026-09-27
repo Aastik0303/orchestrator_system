@@ -39,17 +39,32 @@ def _validate_upload(filename: str, size: int, content: bytes | None = None) -> 
         raise HTTPException(status_code=415, detail="Text uploads must not contain binary data.")
 
 
-async def _store_uploads(files: list[UploadFile], *, user_id: str, project_id: str) -> list[UploadedFile]:
+async def _read_uploads(files: list[UploadFile]) -> list[tuple[str, str | None, bytes]]:
+    """Read and validate every file before anything is persisted, so a bad
+    file never leaves earlier files or the chat message half-saved."""
     settings = get_settings()
     if len(files) > settings.max_files_per_request:
         raise HTTPException(status_code=413, detail=f"At most {settings.max_files_per_request} files per request.")
-    uploads_dir = settings.uploads_dir
-    uploads_dir.mkdir(parents=True, exist_ok=True)
-    uploaded_files: list[UploadedFile] = []
+    validated: list[tuple[str, str | None, bytes]] = []
     for incoming in files:
         safe_name = Path(incoming.filename or "upload").name[:200] or "upload"
         content = await incoming.read(settings.max_upload_size + 1)
         _validate_upload(safe_name, len(content), content)
+        validated.append((safe_name, incoming.content_type, content))
+    return validated
+
+
+async def _store_uploads(
+    files: list[tuple[str, str | None, bytes]],
+    *,
+    user_id: str,
+    project_id: str,
+    session_id: str | None = None,
+) -> list[UploadedFile]:
+    uploads_dir = get_settings().uploads_dir
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    uploaded_files: list[UploadedFile] = []
+    for safe_name, content_type, content in files:
         storage_path = uploads_dir / f"{uuid4().hex}_{safe_name}"
         await asyncio.to_thread(storage_path.write_bytes, content)
         document = await asyncio.to_thread(
@@ -57,9 +72,10 @@ async def _store_uploads(files: list[UploadFile], *, user_id: str, project_id: s
             user_id=user_id,
             project_id=project_id,
             name=safe_name,
-            content_type=incoming.content_type,
+            content_type=content_type,
             storage_path=str(storage_path),
             size=len(content),
+            session_id=session_id,
         )
         try:
             await asyncio.to_thread(index_document, document["id"], user_id=user_id)
@@ -69,7 +85,7 @@ async def _store_uploads(files: list[UploadFile], *, user_id: str, project_id: s
         uploaded_files.append(
             UploadedFile(
                 name=safe_name,
-                content_type=incoming.content_type,
+                content_type=content_type,
                 storage_path=str(storage_path),
                 document_id=document["id"],
             )
@@ -90,6 +106,37 @@ def _validate_agent_override(agent_override: str) -> None:
         raise HTTPException(status_code=422, detail="System agents cannot be selected manually.")
 
 
+def _uploaded_file(document: dict) -> UploadedFile:
+    return UploadedFile(
+        name=document["name"],
+        content_type=document.get("content_type"),
+        storage_path=document.get("storage_path"),
+        document_id=document["id"],
+    )
+
+
+def _attach_existing_documents(raw: str | None, *, session_id: str, user_id: str, project_id: str) -> list[UploadedFile]:
+    """Documents uploaded earlier (e.g. via /documents/upload) and attached to
+    this message by id. Ids the caller does not own are ignored."""
+    ids = list(dict.fromkeys(item.strip() for item in (raw or "").split(",") if item.strip()))
+    if not ids:
+        return []
+    if len(ids) > get_settings().max_files_per_request:
+        raise HTTPException(status_code=413, detail=f"At most {get_settings().max_files_per_request} files per request.")
+    documents = [runtime_store.get_document(document_id, user_id=user_id) for document_id in ids]
+    owned = [document for document in documents if document and document["project_id"] == project_id]
+    runtime_store.attach_documents_to_session([document["id"] for document in owned], session_id, user_id=user_id)
+    return [_uploaded_file(document) for document in owned]
+
+
+def _session_documents(session_id: str, *, user_id: str, project_id: str) -> list[UploadedFile]:
+    return [
+        _uploaded_file(document)
+        for document in runtime_store.list_session_documents(session_id, user_id=user_id)
+        if document["status"] == "indexed" and document["project_id"] == project_id
+    ]
+
+
 def _approved_tools(raw: str | None) -> list[str]:
     if not raw:
         return []
@@ -106,6 +153,7 @@ async def _prepare_request(
     project_id: str,
     files: list[UploadFile],
     approved_tools: str | None,
+    document_ids: str | None = None,
 ) -> tuple[ChatRequest, str]:
     enforce_rate_limit(principal.user_id)
     _validate_agent_override(agent_override)
@@ -113,9 +161,24 @@ async def _prepare_request(
         raise HTTPException(status_code=422, detail="Message must not be empty.")
     if len(message) > 50_000:
         raise HTTPException(status_code=413, detail="Message is too long.")
+    validated_files = await _read_uploads(files)
     session = await asyncio.to_thread(ensure_session, session_id, message[:80], user_id=principal.user_id)
     await asyncio.to_thread(add_message, session["id"], "user", message)
-    uploaded_files = await _store_uploads(files, user_id=principal.user_id, project_id=project_id)
+    uploaded_files = await _store_uploads(
+        validated_files, user_id=principal.user_id, project_id=project_id, session_id=session["id"]
+    )
+    uploaded_files += await asyncio.to_thread(
+        _attach_existing_documents,
+        document_ids,
+        session_id=session["id"],
+        user_id=principal.user_id,
+        project_id=project_id,
+    )
+    session_files: list[UploadedFile] = []
+    if not uploaded_files:
+        session_files = await asyncio.to_thread(
+            _session_documents, session["id"], user_id=principal.user_id, project_id=project_id
+        )
     return (
         ChatRequest(
             message=message,
@@ -125,6 +188,7 @@ async def _prepare_request(
             user_id=principal.user_id,
             project_id=project_id,
             files=uploaded_files,
+            session_files=session_files,
             approved_tools=_approved_tools(approved_tools),
         ),
         session["id"],
@@ -145,9 +209,12 @@ async def chat(
     user_id: str | None = Form(None),
     project_id: str = Form("default"),
     approved_tools: str | None = Form(None),
+    document_ids: str | None = Form(None),
     files: list[UploadFile] = File(default=[]),
 ):
     principal = _chat_principal(request, user_id)
+    # Synchronous runs count against the same concurrency limit as background ones.
+    await enforce_active_run_limit(principal.user_id)
     chat_request, resolved_session_id = await _prepare_request(
         principal=principal,
         message=message,
@@ -157,6 +224,7 @@ async def chat(
         project_id=project_id,
         files=files,
         approved_tools=approved_tools,
+        document_ids=document_ids,
     )
     run_id = f"run_{uuid4().hex[:12]}"
     try:
@@ -177,6 +245,7 @@ async def start_chat(
     user_id: str | None = Form(None),
     project_id: str = Form("default"),
     approved_tools: str | None = Form(None),
+    document_ids: str | None = Form(None),
     files: list[UploadFile] = File(default=[]),
 ):
     principal = _chat_principal(request, user_id)
@@ -190,6 +259,7 @@ async def start_chat(
         project_id=project_id,
         files=files,
         approved_tools=approved_tools,
+        document_ids=document_ids,
     )
     run_id = f"run_{uuid4().hex[:12]}"
     await get_run_queue().submit(run_id, chat_request, trace_id=getattr(request.state, "trace_id", None))
@@ -227,7 +297,7 @@ async def upload_documents(
 ):
     principal = principal_from_request(request, user_id)
     enforce_rate_limit(principal.user_id, scope="upload")
-    uploaded = await _store_uploads(files, user_id=principal.user_id, project_id=project_id)
+    uploaded = await _store_uploads(await _read_uploads(files), user_id=principal.user_id, project_id=project_id)
     documents = [
         await asyncio.to_thread(runtime_store.get_document, file.document_id or "", user_id=principal.user_id)
         for file in uploaded

@@ -23,6 +23,7 @@ from uuid import uuid4
 from app.agents.catalog import load_agents
 from app.agents.context import RunContext
 from app.agents.registry import AgentRegistry
+from app.agents.visualization import charts_from_metadata, render_chart_blocks, strip_chart_blocks
 from app.config import get_settings
 from app.core.budget import Budget, ExecutionLimits
 from app.core.errors import ErrorType, StructuredFailure
@@ -296,7 +297,7 @@ class DynamicOrchestrator:
             capability=step.capability,
             goal=request.message,
             instruction=step.instruction or step.description,
-            files=request.files,
+            files=request.files or request.session_files,
             inputs=task_inputs,
             memory=memory if is_task_agent else [],
             conversation=conversation if is_task_agent else [],
@@ -501,7 +502,7 @@ class DynamicOrchestrator:
         except Exception:
             logger.warning("conversation_load_failed")
             return []
-        turns = [{"role": item["role"], "content": item["content"]} for item in messages]
+        turns = [{"role": item["role"], "content": strip_chart_blocks(item["content"])} for item in messages]
         if turns and turns[-1]["role"] == "user" and turns[-1]["content"] == request.message:
             turns = turns[:-1]
         return turns[-6:]
@@ -535,6 +536,7 @@ class DynamicOrchestrator:
                         run_id=ctx.run_id,
                         session_id=request.session_id,
                         store=self.store,
+                        request=request.message,
                     ),
                     timeout=10,
                 )
@@ -596,6 +598,7 @@ def _render_direct_result(result: AgentResult | None) -> str:
         sections.append("\n".join(f"{index}. {item}" for index, item in enumerate(result.recommendations, 1)))
     if result.warnings:
         sections.append("\n".join(f"> {warning}" for warning in result.warnings))
+    sections.append(render_chart_blocks(charts_from_metadata(result.metadata)))
     return "\n\n".join(section for section in sections if section).strip()
 
 

@@ -1,5 +1,5 @@
 {
-  "recorded_at": "2026-09-25T17:15:11Z",
+  "recorded_at": "2026-09-26T07:59:18Z",
   "thresholds": {
     "router.accuracy": 0.9,
     "rag.retrieval_hit_rate": 0.9,
@@ -82,29 +82,29 @@
         {
           "concurrency": 1,
           "requests": 10,
-          "p50_ms": 71.1,
-          "p95_ms": 74.7,
-          "mean_tokens": 544.3,
+          "p50_ms": 78.3,
+          "p95_ms": 86.7,
+          "mean_tokens": 578.5,
           "error_rate": 0.0,
-          "throughput_rps": 14.04
+          "throughput_rps": 12.49
         },
         {
           "concurrency": 10,
           "requests": 20,
-          "p50_ms": 123.5,
-          "p95_ms": 222.2,
-          "mean_tokens": 561.1,
+          "p50_ms": 170.3,
+          "p95_ms": 496.6,
+          "mean_tokens": 582.7,
           "error_rate": 0.0,
-          "throughput_rps": 68.01
+          "throughput_rps": 39.07
         },
         {
           "concurrency": 25,
           "requests": 50,
-          "p50_ms": 183.6,
-          "p95_ms": 567.7,
-          "mean_tokens": 580.6,
+          "p50_ms": 429.4,
+          "p95_ms": 1085.9,
+          "mean_tokens": 594.3,
           "error_rate": 0.0,
-          "throughput_rps": 77.0
+          "throughput_rps": 32.76
         }
       ],
       "note": "In-process orchestrator only (no HTTP); see benchmarks/ for end-to-end numbers."
@@ -841,29 +841,29 @@
           {
             "concurrency": 1,
             "requests": 10,
-            "p50_ms": 71.1,
-            "p95_ms": 74.7,
-            "mean_tokens": 544.3,
+            "p50_ms": 78.3,
+            "p95_ms": 86.7,
+            "mean_tokens": 578.5,
             "error_rate": 0.0,
-            "throughput_rps": 14.04
+            "throughput_rps": 12.49
           },
           {
             "concurrency": 10,
             "requests": 20,
-            "p50_ms": 123.5,
-            "p95_ms": 222.2,
-            "mean_tokens": 561.1,
+            "p50_ms": 170.3,
+            "p95_ms": 496.6,
+            "mean_tokens": 582.7,
             "error_rate": 0.0,
-            "throughput_rps": 68.01
+            "throughput_rps": 39.07
           },
           {
             "concurrency": 25,
             "requests": 50,
-            "p50_ms": 183.6,
-            "p95_ms": 567.7,
-            "mean_tokens": 580.6,
+            "p50_ms": 429.4,
+            "p95_ms": 1085.9,
+            "mean_tokens": 594.3,
             "error_rate": 0.0,
-            "throughput_rps": 77.0
+            "throughput_rps": 32.76
           }
         ],
         "note": "In-process orchestrator only (no HTTP); see benchmarks/ for end-to-end numbers."

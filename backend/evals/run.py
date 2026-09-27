@@ -36,6 +36,11 @@ os.environ.update(
         "RATE_LIMIT_PER_MINUTE": "100000",
         "ROUTER_LLM_ENABLED": "false",
         "LOG_LEVEL": "CRITICAL",
+        "WEB_FETCH_ENABLED": "false",
+        "WEB_SEARCH_API_KEY": "",
+        "GITHUB_ENABLED": "false",
+        "YOUTUBE_TRANSCRIPTS_ENABLED": "false",
+        "SQL_AGENT_DATABASE_URL": "",
     }
 )
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -313,6 +318,8 @@ async def security_suite() -> dict:
 
 async def performance_suite(simulated_llm_ms: int = 50) -> dict:
     os.environ["FAKE_LLM_LATENCY_MS"] = str(simulated_llm_ms)
+    # Every request pays the simulated model latency (no response cache hits).
+    os.environ["LLM_DETERMINISTIC"] = "false"
     get_settings.cache_clear()
     orchestrator = DynamicOrchestrator(runtime_store)
     messages = [
@@ -353,6 +360,7 @@ async def performance_suite(simulated_llm_ms: int = 50) -> dict:
             }
         )
     os.environ.pop("FAKE_LLM_LATENCY_MS", None)
+    os.environ.pop("LLM_DETERMINISTIC", None)
     get_settings.cache_clear()
     return {
         "metrics": {
@@ -403,6 +411,7 @@ async def _run_suites(selected: set[str], results: dict) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run offline evaluation suites.")
     parser.add_argument("--suite", action="append", choices=["router", "rag", "agent", "security", "performance"])
+    parser.add_argument("--output", type=Path, help="Report path (default: evals/results/latest.json).")
     args = parser.parse_args()
     selected = set(args.suite or ["router", "rag", "agent", "security", "performance"])
     results = asyncio.run(run_all(selected))
@@ -416,9 +425,10 @@ def main() -> None:
         "summary": {suite: payload["metrics"] for suite, payload in results.items()},
         "suites": results,
     }
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    (RESULTS_DIR / "latest.json").write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
-    if REAL_EMBEDDINGS:
+    output = args.output or RESULTS_DIR / "latest.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+    if REAL_EMBEDDINGS and args.output is None:
         (RESULTS_DIR / "latest-real-embeddings.json").write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
     for suite, metrics in report["summary"].items():
         print(f"[{suite}] " + json.dumps({k: v for k, v in metrics.items() if k != "levels"}, default=str))

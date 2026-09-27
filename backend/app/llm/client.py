@@ -10,6 +10,12 @@
   budget and records actual usage.
 * Error classification with bounded, jittered retries for retryable failures.
 * Optional response cache for deterministic (temperature 0) calls.
+* Reproducibility (`LLM_DETERMINISTIC=true`, the default): every call uses
+  temperature 0 and a fixed seed and goes through the response cache, so an
+  identical prompt yields an identical answer even though providers only
+  promise best-effort determinism for seeded sampling.
+* Model availability: a model the provider no longer serves is reported
+  clearly and, when `GROQ_FALLBACK_MODEL` is set, retried once on it.
 * `LLM_PROVIDER=fake` gives a deterministic offline provider with configurable
   latency for tests and benchmarks.
 """
@@ -21,6 +27,7 @@ import hashlib
 import json
 import logging
 import random
+import re
 import threading
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -69,15 +76,49 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
-def _classify_provider_error(exc: Exception) -> OrchestratorError:
+THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
+
+
+def _is_model_unavailable(exc: Exception) -> bool:
+    """The provider does not (or no longer) serve the requested model."""
+    text = str(exc).lower()
+    if "model_decommissioned" in text or "model_not_found" in text:
+        return True
+    return getattr(exc, "status_code", None) == 404 and "model" in text
+
+
+MAX_RATE_LIMIT_WAIT_SECONDS = 20.0
+
+
+def _retry_after(exc: Exception) -> float | None:
+    """Seconds the provider asked us to wait (Retry-After header), if any."""
+    headers = getattr(getattr(exc, "response", None), "headers", None) or {}
+    try:
+        value = float(headers.get("retry-after"))
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, value)
+
+
+def _uses_reasoning_effort(model: str) -> bool:
+    return model.startswith("openai/gpt-oss")
+
+
+def _classify_provider_error(exc: Exception, *, model: str | None = None) -> OrchestratorError:
     try:
         import groq
     except ImportError:  # pragma: no cover
         groq = None  # type: ignore[assignment]
     name = exc.__class__.__name__
+    if _is_model_unavailable(exc):
+        return ModelError(
+            f"Model '{model}' is not available from the provider (decommissioned or not found). "
+            "Set GROQ_MODEL / GROQ_MODEL_FAST to a served model or configure GROQ_FALLBACK_MODEL.",
+            retryable=False,
+        )
     if groq is not None:
         if isinstance(exc, groq.RateLimitError):
-            return RateLimitError("Model provider rate limit reached.")
+            return RateLimitError("Model provider rate limit reached.", details={"retry_after": _retry_after(exc)})
         if isinstance(exc, groq.APITimeoutError):
             return StepTimeoutError("Model provider request timed out.")
         if isinstance(exc, groq.APIConnectionError):
@@ -97,6 +138,12 @@ def _classify_provider_error(exc: Exception) -> OrchestratorError:
 
 class LLMClient:
     MAX_ATTEMPTS = 3
+
+    def __init__(self) -> None:
+        # Single-flight: identical cacheable prompts in flight at the same time
+        # share one provider call (otherwise concurrent identical requests all
+        # miss the cache and may get different answers). Keyed per event loop.
+        self._inflight: dict[tuple[int, str], asyncio.Future[tuple[str, str] | None]] = {}
 
     def available(self) -> bool:
         settings = get_settings()
@@ -133,26 +180,94 @@ class LLMClient:
         model = self.model_for(tier)
         requested = max_tokens or settings.llm_max_output_tokens
         telemetry = current_telemetry.get()
+        seed: int | None = None
+        if settings.llm_deterministic:
+            temperature = 0.0
+            seed = settings.llm_seed
+            cacheable = True
 
         cache_key = None
+        flight: asyncio.Future[tuple[str, str] | None] | None = None
+        flight_key: tuple[int, str] | None = None
         if cacheable and temperature == 0:
             cache_key = "llm:" + hashlib.sha256(
-                json.dumps([model, system, user, requested, json_mode]).encode()
+                json.dumps([settings.llm_provider.lower(), model, system, user, requested, json_mode, seed]).encode()
             ).hexdigest()
-            cached = get_cache().get(cache_key)
-            if cached is not None:
-                if telemetry:
-                    with telemetry.span_sync("llm", name, model=model, tier=tier, cached=True, total_tokens=0):
-                        pass
-                return LLMResponse(
-                    text=json.loads(cached)["text"],
-                    model=model,
-                    prompt_tokens=0,
-                    completion_tokens=0,
-                    cached=True,
-                )
+            loop = asyncio.get_running_loop()
+            flight_key = (id(loop), cache_key)
+            while True:
+                cached = get_cache().get(cache_key)
+                if cached is not None:
+                    payload = json.loads(cached)
+                    return self._shared_response(payload["text"], payload.get("model", model), name, tier, telemetry)
+                leader = self._inflight.get(flight_key)
+                if leader is None:
+                    break
+                shared = await asyncio.shield(leader)
+                if shared is not None:
+                    return self._shared_response(shared[0], shared[1], name, tier, telemetry)
+                # The leader failed or was capped by its budget: try again.
+            flight = loop.create_future()
+            self._inflight[flight_key] = flight
 
-        allowed_tokens = budget.reserve_llm_call(requested) if budget else requested
+        shared_result: tuple[str, str] | None = None
+        allowed_tokens = requested
+        try:
+            allowed_tokens = budget.reserve_llm_call(requested) if budget else requested
+            try:
+                response = await self._complete_with_retries(
+                    system=system,
+                    user=user,
+                    model=model,
+                    tier=tier,
+                    name=name,
+                    allowed_tokens=allowed_tokens,
+                    temperature=temperature,
+                    seed=seed,
+                    json_mode=json_mode,
+                    budget=budget,
+                    # A budget-capped (possibly truncated) answer must not be served
+                    # later for the same prompt with a full budget.
+                    cache_key=cache_key if allowed_tokens >= requested else None,
+                    telemetry=telemetry,
+                )
+            finally:
+                if budget:
+                    budget.release_reservation(allowed_tokens)
+            if allowed_tokens >= requested:
+                shared_result = (response.text, response.model)
+            return response
+        finally:
+            if flight is not None and flight_key is not None:
+                self._inflight.pop(flight_key, None)
+                if not flight.done():
+                    flight.set_result(shared_result)
+
+    @staticmethod
+    def _shared_response(text: str, model: str, name: str, tier: Tier, telemetry: Any) -> LLMResponse:
+        """A response served from the cache or from an identical in-flight call."""
+        if telemetry:
+            with telemetry.span_sync("llm", name, model=model, tier=tier, cached=True, total_tokens=0):
+                pass
+        return LLMResponse(text=text, model=model, prompt_tokens=0, completion_tokens=0, cached=True)
+
+    async def _complete_with_retries(
+        self,
+        *,
+        system: str,
+        user: str,
+        model: str,
+        tier: Tier,
+        name: str,
+        allowed_tokens: int,
+        temperature: float,
+        seed: int | None,
+        json_mode: bool,
+        budget: Budget | None,
+        cache_key: str | None,
+        telemetry: Any,
+    ) -> LLMResponse:
+        settings = get_settings()
         attempt = 0
         while True:
             attempt += 1
@@ -166,6 +281,10 @@ class LLMClient:
                         max_tokens=allowed_tokens,
                         temperature=temperature,
                         json_mode=json_mode,
+                        seed=seed,
+                        reasoning_effort=(
+                            settings.groq_reasoning_effort_fast if tier == "fast" else settings.groq_reasoning_effort
+                        ),
                     )
                     if span is not None:
                         span.set(
@@ -177,7 +296,11 @@ class LLMClient:
                 if budget:
                     budget.record_tokens(response.total_tokens)
                 if cache_key:
-                    get_cache().set(cache_key, json.dumps({"text": response.text}), 3600)
+                    get_cache().set(
+                        cache_key,
+                        json.dumps({"text": response.text, "model": response.model}),
+                        settings.llm_cache_ttl_seconds,
+                    )
                 return response
             except OrchestratorError as error:
                 can_retry = (
@@ -194,7 +317,9 @@ class LLMClient:
                     raise
                 delay = min(4.0, 0.4 * (2 ** (attempt - 1))) * random.uniform(0.5, 1.0)
                 if error.error_type == ErrorType.RATE_LIMIT:
-                    delay = min(8.0, delay * 2)
+                    # Honour the provider's Retry-After; guessing too short a
+                    # wait just burns the remaining attempts.
+                    delay = min(MAX_RATE_LIMIT_WAIT_SECONDS, max(delay * 2, error.details.get("retry_after") or 0.0))
                 if budget:
                     delay = min(delay, max(0.0, budget.remaining_seconds - 1))
                 await asyncio.sleep(delay)
@@ -208,6 +333,8 @@ class LLMClient:
         max_tokens: int,
         temperature: float,
         json_mode: bool,
+        seed: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> LLMResponse:
         settings = get_settings()
         if settings.llm_provider.lower() == "fake":
@@ -215,7 +342,6 @@ class LLMClient:
 
         client = _groq_client(settings.groq_api_key or "", settings.llm_request_timeout_seconds)
         kwargs: dict[str, Any] = {
-            "model": model,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -223,19 +349,40 @@ class LLMClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        if seed is not None:
+            kwargs["seed"] = seed
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
-        try:
-            completion = await asyncio.to_thread(client.chat.completions.create, **kwargs)
-        except OrchestratorError:
-            raise
-        except Exception as exc:
-            raise _classify_provider_error(exc) from None
-        text = (completion.choices[0].message.content or "").strip()
+        candidates = [model]
+        if settings.groq_fallback_model and settings.groq_fallback_model != model:
+            candidates.append(settings.groq_fallback_model)
+        for index, candidate in enumerate(candidates):
+            call_kwargs = {**kwargs, "model": candidate}
+            if reasoning_effort and _uses_reasoning_effort(candidate):
+                call_kwargs["reasoning_effort"] = reasoning_effort
+            try:
+                completion = await asyncio.to_thread(client.chat.completions.create, **call_kwargs)
+            except OrchestratorError:
+                raise
+            except Exception as exc:
+                if _is_model_unavailable(exc) and index + 1 < len(candidates):
+                    logger.warning("llm_model_unavailable", extra={"status": "fallback"})
+                    continue
+                raise _classify_provider_error(exc, model=candidate) from None
+            model = candidate
+            break
+        choice = completion.choices[0]
+        # Reasoning models may inline their chain of thought; never return it.
+        text = THINK_RE.sub("", choice.message.content or "").strip()
         usage = getattr(completion, "usage", None)
         prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0) or estimate_tokens(system + user)
         completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0) or estimate_tokens(text)
         if not text:
+            if getattr(choice, "finish_reason", None) == "length":
+                # Not retryable: the same budget would be exhausted again.
+                raise ModelError(
+                    "Model used its whole output token budget (reasoning) before answering.", retryable=False
+                )
             raise ModelError("Model returned an empty completion.", retryable=True)
         return LLMResponse(text=text, model=model, prompt_tokens=prompt_tokens, completion_tokens=completion_tokens)
 

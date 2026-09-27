@@ -6,7 +6,7 @@ from app.config import get_settings
 from app.models import AgentResult, EvaluationResult
 
 WORD_RE = re.compile(r"[a-z0-9_]{3,}", re.IGNORECASE)
-INLINE_CITATION_RE = re.compile(r"\[Source\s+\d+\]", re.IGNORECASE)
+INLINE_CITATION_RE = re.compile(r"\[Source\s+\d+(?:\s*[,;:][^\]\n]{0,40})?\]", re.IGNORECASE)
 STOP_WORDS = {
     "about",
     "after",

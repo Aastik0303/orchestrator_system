@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import math
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 import pandas as pd
 
 from app.agents.context import AgentContext
 from app.agents.registry import ModelPolicy, PermissionPolicy, RetryPolicy, RoutingHints, register_agent
+from app.agents.visualization import MAX_CHARTS_TOTAL, build_charts
 from app.config import get_settings
 from app.models import AgentResult, AgentTask, ChatRequest, UploadedFile
-from app.services.runtime_store import runtime_store
+from app.services.runtime_store import RuntimeStore, runtime_store
 
 # Overridable in tests; defaults to STORAGE_ROOT/outputs.
 OUTPUT_DIR: Path | None = None
@@ -22,15 +23,28 @@ MAX_STORED_DATASETS = 3
 MAX_ROWS_PROFILED = 2_000_000
 
 
-def _output_dir() -> Path:
-    directory = OUTPUT_DIR or get_settings().outputs_dir
+def _output_root() -> Path:
+    return OUTPUT_DIR or get_settings().outputs_dir
+
+
+def _output_dir(user_id: str) -> Path:
+    """Per-user folder (same layout as the file.write_report tool)."""
+    directory = _output_root() / hashlib.sha256(user_id.encode()).hexdigest()[:16]
     directory.mkdir(parents=True, exist_ok=True)
     return directory
 
 
+def resolve_artifact(relative_path: str) -> Path:
+    """Absolute location of an artifact path returned by this agent."""
+    return _output_root() / relative_path
+
+
 @register_agent(
     name="data_analyst",
-    description="Profiles CSV and Excel data quality, statistics, outliers, and correlations (deterministic, no LLM).",
+    description=(
+        "Profiles CSV and Excel data quality, statistics, outliers, and correlations, "
+        "and renders charts (trends, distributions, categories, correlations). Deterministic, no LLM."
+    ),
     capabilities=["data_analysis"],
     tools=["data.inspect_dataset", "data.calculate_statistics"],
     timeout_seconds=90,
@@ -40,24 +54,25 @@ def _output_dir() -> Path:
     permission_policy=PermissionPolicy(granted_permissions={"files:read"}),
     routing_hints={
         "data_analysis": RoutingHints(
-            description="Analyze tabular datasets (CSV/Excel): quality, statistics, trends.",
+            description="Analyze and visualize tabular datasets (CSV/Excel): quality, statistics, trends, charts.",
             file_extensions={".csv", ".xlsx", ".xls"},
         )
     },
 )
 async def data_analyst(task: AgentTask, ctx: AgentContext) -> AgentResult:
     # pandas work is CPU/disk bound: keep it off the event loop.
-    return await asyncio.to_thread(data_analyst_agent, task.request())
+    return await asyncio.to_thread(data_analyst_agent, task.request(), store=ctx.run.store)
 
 
-def data_analyst_agent(request: ChatRequest) -> AgentResult:
+def data_analyst_agent(request: ChatRequest, *, store: RuntimeStore | None = None) -> AgentResult:
     artifacts: list[dict[str, Any]] = []
     findings: list[str] = []
     recommendations: list[str] = []
     warnings: list[str] = []
     profiles: list[dict[str, Any]] = []
+    charts: list[dict[str, Any]] = []
 
-    datasets = _resolve_datasets(request)
+    datasets = _resolve_datasets(request, store or runtime_store)
     if not request.files and datasets:
         findings.append(
             f"Using {len(datasets)} stored dataset file{'s' if len(datasets) != 1 else ''} "
@@ -81,28 +96,28 @@ def data_analyst_agent(request: ChatRequest) -> AgentResult:
         file_profiles = []
         for sheet_name, dataframe in frames.items():
             profile = _profile_frame(dataframe, file_name=uploaded.name, sheet_name=sheet_name)
+            profile["charts"] = build_charts(dataframe, profile, request.message)
+            charts.extend(profile["charts"])
             profiles.append(profile)
             file_profiles.append(profile)
             findings.extend(_render_profile_findings(profile))
             recommendations.extend(_profile_recommendations(profile))
 
-        artifact_path = _output_dir() / f"{source_path.stem}_{uuid4().hex[:8]}_profile.json"
-        artifact_path.write_text(
-            json.dumps(
-                {
-                    "question": request.message,
-                    "source_file": uploaded.name,
-                    "profiles": file_profiles,
-                },
-                indent=2,
-                ensure_ascii=True,
-            ),
-            encoding="utf-8",
+        content = json.dumps(
+            {"question": request.message, "source_file": uploaded.name, "profiles": file_profiles},
+            indent=2,
+            ensure_ascii=True,
         )
+        # Content-addressed name: the same analysis always yields the same
+        # artifact, and the client never sees server filesystem paths.
+        digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
+        directory = _output_dir(request.user_id)
+        artifact_path = directory / f"{Path(uploaded.name).stem[:60]}_{digest}_profile.json"
+        artifact_path.write_text(content, encoding="utf-8")
         artifacts.append(
             {
                 "name": artifact_path.name,
-                "path": str(artifact_path),
+                "path": f"{directory.name}/{artifact_path.name}",
                 "type": "data_profile",
             }
         )
@@ -145,17 +160,18 @@ def data_analyst_agent(request: ChatRequest) -> AgentResult:
             "rows_analyzed": total_rows,
             "average_quality_score": round(average_quality, 2),
             "profile_format": "json",
+            "charts": charts[:MAX_CHARTS_TOTAL],
         },
     )
 
 
-def _resolve_datasets(request: ChatRequest) -> list[UploadedFile]:
+def _resolve_datasets(request: ChatRequest, store: RuntimeStore) -> list[UploadedFile]:
     attached = [file for file in request.files if _is_supported_dataset(file.name)]
     if attached:
         return attached
 
     try:
-        documents = runtime_store.list_documents(
+        documents = store.list_documents(
             user_id=request.user_id,
             project_id=request.project_id,
         )
@@ -163,11 +179,14 @@ def _resolve_datasets(request: ChatRequest) -> list[UploadedFile]:
         return []
 
     datasets: list[UploadedFile] = []
-    for document in documents:
+    seen: set[str] = set()
+    for document in documents:  # newest first
         name = str(document.get("name") or "")
         storage_path = document.get("storage_path")
-        if not _is_supported_dataset(name):
+        # Re-uploads of the same file would otherwise be profiled repeatedly.
+        if not _is_supported_dataset(name) or name.lower() in seen:
             continue
+        seen.add(name.lower())
         if len(datasets) >= MAX_STORED_DATASETS:
             break
         datasets.append(

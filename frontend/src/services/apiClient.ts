@@ -280,21 +280,30 @@ export function getBackendHealth() {
   return requestJson<{ status: string; database: string; mcp_servers: number }>('/health')
 }
 
-function chatFormData({ message, files, sessionId }: { message: string; files: File[]; sessionId?: string }) {
+type ChatInput = {
+  message: string
+  files: File[]
+  // Documents already uploaded via uploadKnowledgeDocuments, attached by id.
+  documentIds?: string[]
+  sessionId?: string
+}
+
+function chatFormData({ message, files, documentIds, sessionId }: ChatInput) {
   const formData = new FormData()
   formData.set('message', message)
   formData.set('agent_override', 'auto')
   formData.set('deep_research', 'false')
   if (sessionId) formData.set('session_id', sessionId)
+  if (documentIds?.length) formData.set('document_ids', documentIds.join(','))
   files.forEach(file => formData.append('files', file))
   return formData
 }
 
-export function sendChatMessage(input: { message: string; files: File[]; sessionId?: string }) {
+export function sendChatMessage(input: ChatInput) {
   return requestJson<ChatResponse>('/api/chat', { method: 'POST', body: chatFormData(input) })
 }
 
-export function startChatRun(input: { message: string; files: File[]; sessionId?: string }) {
+export function startChatRun(input: ChatInput) {
   return requestJson<ChatRunStart>('/api/chat/start', { method: 'POST', body: chatFormData(input) })
 }
 

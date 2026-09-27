@@ -72,7 +72,9 @@ async def python_executor(task: AgentTask, ctx: AgentContext) -> AgentResult:
         )
     result = await ctx.call_tool("sandbox.python_exec", {"code": code})
     status = result.get("status")
-    lines = [f"Sandbox status: **{status}** ({result.get('duration_ms', 0)} ms)."]
+    # Wall-clock timing lives in metadata, not in the answer text, so the same
+    # code always produces the same answer.
+    lines = [f"Sandbox status: **{status}**."]
     if result.get("stdout"):
         lines.append("```text\n" + str(result["stdout"])[:4000] + "\n```")
     if result.get("stderr"):
@@ -84,5 +86,10 @@ async def python_executor(task: AgentTask, ctx: AgentContext) -> AgentResult:
         summary="\n\n".join(lines),
         artifacts=[{"type": "sandbox_run", "status": status, "code": code[:4000]}],
         warnings=warnings,
-        metadata={"tool_success": status == "ok", "sandbox": result.get("limits", {}), "generated_code": generated},
+        metadata={
+            "tool_success": status == "ok",
+            "sandbox": result.get("limits", {}),
+            "sandbox_duration_ms": result.get("duration_ms", 0),
+            "generated_code": generated,
+        },
     )

@@ -80,6 +80,9 @@ def start_servers(
         "GROQ_API_KEY": "",
         "LLM_PROVIDER": "fake",
         "FAKE_LLM_LATENCY_MS": str(fake_llm_latency_ms),
+        # Measure real model latency on every request: with the response cache
+        # (LLM_DETERMINISTIC) repeated benchmark prompts would be cache hits.
+        "LLM_DETERMINISTIC": "false",
         "RUNTIME_DATABASE_PATH": str(Path(storage_dir) / "runtime.db"),
         "STORAGE_ROOT": storage_dir,
         "RATE_LIMIT_PER_MINUTE": "100000",

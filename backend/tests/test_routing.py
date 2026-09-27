@@ -134,6 +134,22 @@ class RuleAndCapabilityRoutingTests(unittest.TestCase):
         self.assertEqual((decision.primary_agent, decision.strategy), ("general_chat", "capability"))
         self.assertGreaterEqual(decision.confidence, 0.65)
 
+    def test_resume_questions_route_to_rag(self):
+        for message in ("summarize my resume", "what skills are listed in this CV", "what does the attached document say"):
+            self.assertEqual(choose_route(ChatRequest(message=message)).primary_agent, AgentName.DOCUMENT_RAG, message)
+
+    def test_follow_up_in_chat_with_attached_document_routes_to_rag(self):
+        resume = [UploadedFile(name="resume.pdf", document_id="doc_1")]
+        for message in ("what are my skills?", "who is Aastik Mishra", "hey, what projects are mentioned in there"):
+            decision = choose_route(ChatRequest(message=message, session_files=resume))
+            self.assertEqual((decision.primary_agent, decision.strategy), (AgentName.DOCUMENT_RAG, "rule"), message)
+        # Short chit-chat and clear specialist requests are unaffected.
+        self.assertEqual(choose_route(ChatRequest(message="thanks!", session_files=resume)).primary_agent, "general_chat")
+        self.assertEqual(
+            choose_route(ChatRequest(message="Write a python function that parses ISO dates", session_files=resume)).primary_agent,
+            AgentName.CODE_DEV,
+        )
+
     def test_no_signal_falls_back_to_conversation(self):
         decision = choose_route(ChatRequest(message="could you look into what our rivals shipped lately"))
         self.assertEqual((decision.primary_agent, decision.strategy), ("general_chat", "fallback"))
@@ -165,6 +181,18 @@ class LlmRoutingTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(router._llm, "complete", llm_json('{"required_capabilities":["code_generation"],"confidence":0.2}')):
             decision = await router.route(ChatRequest(message="could you look into what our rivals shipped lately"))
         self.assertEqual(decision.strategy, "fallback")
+
+    async def test_llm_router_knows_about_session_documents_and_may_pick_conversation(self):
+        request = ChatRequest(message="what is the capital of France", session_files=[UploadedFile(name="resume.pdf")])
+        mock = llm_json('{"intent":"chat","required_capabilities":["conversation"],"confidence":0.9}')
+        with patch.object(router._llm, "complete", mock):
+            decision = await router.route(request)
+        self.assertEqual(decision.primary_agent, "general_chat")
+        self.assertIn("resume.pdf", mock.call_args.kwargs["system"])
+        # Without a usable LLM answer the session documents are used.
+        with patch.object(router._llm, "complete", llm_json("not json")):
+            decision = await router.route(ChatRequest(message="what are his main skills", session_files=[UploadedFile(name="resume.pdf")]))
+        self.assertEqual(decision.primary_agent, "document_rag")
 
     async def test_confident_rule_decisions_skip_the_llm(self):
         mock = llm_json("{}")

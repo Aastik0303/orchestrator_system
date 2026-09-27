@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from app.agents.context import AgentContext
 from app.agents.registry import ModelPolicy, RetryPolicy, RoutingHints, register_agent
+from app.agents.visualization import charts_from_metadata, render_chart_blocks
 from app.models import AgentResult, AgentTask, ChatRequest, StepArtifact
 
 
@@ -57,6 +58,9 @@ def generate_report(request: ChatRequest | None, outputs: dict[str, AgentResult]
         sections.extend(["## Sources", "\n".join(rendered)])
     if warnings:
         sections.extend(["## Limitations", "\n".join(f"- {item}" for item in warnings)])
+    charts = [chart for result in outputs.values() for chart in charts_from_metadata(result.metadata)]
+    if charts:
+        sections.append(render_chart_blocks(charts))
     return "\n\n".join(sections).strip()
 
 

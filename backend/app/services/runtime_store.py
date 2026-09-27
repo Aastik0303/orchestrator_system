@@ -16,6 +16,7 @@ event loop is never blocked by database I/O.
 
 from __future__ import annotations
 
+import atexit
 import functools
 import json
 import logging
@@ -156,6 +157,9 @@ documents = sa.Table(
     sa.Column("id", sa.String(64), primary_key=True),
     sa.Column("user_id", sa.String(128), nullable=False),
     sa.Column("project_id", sa.String(128), nullable=False),
+    # Chat session the document was attached in, so follow-up questions in
+    # that chat can keep using it without re-attaching.
+    sa.Column("session_id", sa.String(64)),
     sa.Column("name", sa.String(255), nullable=False),
     sa.Column("content_type", sa.String(160)),
     sa.Column("storage_path", sa.Text),
@@ -273,7 +277,7 @@ _LATE_COLUMNS: dict[str, dict[str, str]] = {
         "worker_id": "VARCHAR(64)",
         "cancel_requested": "INTEGER NOT NULL DEFAULT 0",
     },
-    "documents": {"embedding_model": "VARCHAR(255)"},
+    "documents": {"embedding_model": "VARCHAR(255)", "session_id": "VARCHAR(64)"},
     "document_chunks": {"embedding_blob": "BLOB"},
     "memories": {"embedding_blob": "BLOB"},
     "chat_sessions": {"user_id": "VARCHAR(128) NOT NULL DEFAULT 'local-user'"},
@@ -335,6 +339,11 @@ def dispose_engines() -> None:
         for engine in _ENGINES.values():
             engine.dispose()
         _ENGINES.clear()
+
+
+# CLI processes (workers, evals, tests) have no lifespan hook: close pooled
+# connections at exit instead of leaving them to the garbage collector.
+atexit.register(dispose_engines)
 
 
 def _columns(engine: Engine, table: str) -> set[str]:
@@ -1001,7 +1010,7 @@ class RuntimeStore:
                 connection.execute(
                     sa.select(run_steps)
                     .where(run_steps.c.run_id == run_id)
-                    .order_by(run_steps.c.started_at.is_(None), run_steps.c.started_at)
+                    .order_by(run_steps.c.started_at.is_(None), run_steps.c.started_at, run_steps.c.step_id)
                 )
                 .mappings()
                 .all()
@@ -1113,6 +1122,7 @@ class RuntimeStore:
         content_type: str | None,
         storage_path: str,
         size: int,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         document_id = f"doc_{uuid4().hex[:16]}"
         now = utc_now()
@@ -1122,6 +1132,7 @@ class RuntimeStore:
                     id=document_id,
                     user_id=user_id,
                     project_id=project_id,
+                    session_id=session_id,
                     name=name,
                     content_type=content_type,
                     storage_path=storage_path,
@@ -1188,6 +1199,29 @@ class RuntimeStore:
         statement = statement.order_by(documents.c.created_at.desc())
         with self.begin() as connection:
             return [dict(row) for row in connection.execute(statement).mappings().all()]
+
+    @_instrumented
+    def list_session_documents(self, session_id: str, *, user_id: str) -> list[dict[str, Any]]:
+        statement = (
+            sa.select(documents)
+            .where(documents.c.session_id == session_id, documents.c.user_id == user_id)
+            .order_by(documents.c.created_at.desc())
+        )
+        with self.begin() as connection:
+            return [dict(row) for row in connection.execute(statement).mappings().all()]
+
+    @_instrumented
+    def attach_documents_to_session(self, document_ids: list[str], session_id: str, *, user_id: str) -> int:
+        """Link the caller's existing documents to a chat session."""
+        if not document_ids:
+            return 0
+        with self.begin() as connection:
+            result = connection.execute(
+                documents.update()
+                .where(documents.c.id.in_(document_ids), documents.c.user_id == user_id)
+                .values(session_id=session_id, updated_at=utc_now())
+            )
+        return result.rowcount or 0
 
     @_instrumented
     def get_document(self, document_id: str, *, user_id: str) -> dict[str, Any] | None:
@@ -1294,6 +1328,9 @@ class RuntimeStore:
             scope = scope.where(documents.c.id.in_(document_ids))
         if embedding_model:
             scope = scope.where(documents.c.embedding_model == embedding_model)
+        # Fixed candidate order + stable sort: equal scores (e.g. the same file
+        # uploaded twice) always rank the same way.
+        scope = scope.order_by(document_chunks.c.document_id, document_chunks.c.chunk_index)
         ids: list[str] = []
         vectors: list[np.ndarray] = []
         query = np.asarray(query_embedding, dtype=np.float32)
@@ -1306,7 +1343,7 @@ class RuntimeStore:
         if not ids:
             return []
         scores = _cosine_scores(np.vstack(vectors), query)
-        order = np.argsort(-scores)
+        order = np.argsort(-scores, kind="stable")
         return [(ids[i], float(scores[i])) for i in order[: max(1, top_k)] if scores[i] >= threshold]
 
     def _pgvector_winners(self, connection, query_embedding, *, user_id, project_id, top_k, threshold, document_ids, embedding_model):
@@ -1329,15 +1366,19 @@ class RuntimeStore:
             pass
         where = " AND ".join(conditions)
         distance = f'c.embedding_vec OPERATOR("{self._vector_schema}".<=>) CAST(:q AS {self._vector_type})'
+        # ORDER BY must stay the bare distance for the HNSW index to be used;
+        # a small overfetch is re-ranked with a deterministic tie-break.
+        params["k"] = max(1, top_k) + 8
         rows = connection.execute(
             sa.text(
-                f"SELECT c.id, 1 - ({distance}) AS similarity "
+                f"SELECT c.id, c.document_id, c.chunk_index, 1 - ({distance}) AS similarity "
                 "FROM document_chunks c JOIN documents d ON d.id = c.document_id "
                 f"WHERE {where} ORDER BY {distance} LIMIT :k"
             ),
             params,
         ).all()
-        return [(chunk_id, float(score)) for chunk_id, score in rows if float(score) >= threshold]
+        ranked = sorted(rows, key=lambda row: (-round(float(row[3]), 6), row[1], row[2]))[: max(1, top_k)]
+        return [(row[0], float(row[3])) for row in ranked if float(row[3]) >= threshold]
 
     # -------------------------------------------------------------- memories
 
@@ -1435,8 +1476,7 @@ class RuntimeStore:
                     _cosine_scores(np.asarray([vector], dtype=np.float32), query)[0]
                 )
         items.sort(
-            key=lambda item: (item["similarity"] * 0.8) + (item["importance_score"] * 0.2),
-            reverse=True,
+            key=lambda item: (-round((item["similarity"] * 0.8) + (item["importance_score"] * 0.2), 6), item["id"])
         )
         return items[:limit]
 

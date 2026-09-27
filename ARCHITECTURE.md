@@ -61,6 +61,20 @@ Every agent is an `AgentSpec`:
 | `permission_policy` | granted permissions (e.g. `vector:read`, `code:execute`) |
 | `routing_hints` | optional keywords / file types / URL patterns / `suppresses`, per capability |
 
+Agents and the tools they use:
+
+| Agent | Model | Tools |
+|---|---|---|
+| `general_chat` | quality | none |
+| `deep_research` | quality | `web.fetch_page` (linked pages), `web.web_search` (when a key is set); cites `[Source N]` |
+| `code_dev` | quality | `github.*` read tools for a linked repository (overview, README, file tree, manifests / named files) |
+| `document_rag` | quality | `vector.search_chunks` (LangGraph RAG subgraph) |
+| `youtube_rag` | quality | `youtube.get_transcript`; timestamped windows, question-relevant selection for long videos |
+| `sql_agent` | fast | `data.sql_schema`, `data.sql_query` (read-only, allowlisted, row-limited; one repair attempt for model-written SQL) |
+| `data_analyst` | none | pandas profiling of CSV/Excel |
+| `python_executor` | fast (only to write code) | `sandbox.python_exec` (approval required) |
+| `memory`, `report_generator`, `evaluation` | none | system agents |
+
 Adding an agent = one new module in `app/agents/` with `@register_agent(...)`.
 `catalog.load_agents()` discovers it; the router picks up its routing hints; a
 brand-new capability needs no router change (see
@@ -192,11 +206,35 @@ Stale-model documents are skipped (not re-embedded in the query path).
 ## Model gateway
 
 `app/llm/client.py`: one shared provider client per process, async interface
-(blocking SDK call in a worker thread), model tiers (`GROQ_MODEL_FAST` for
-routing/code-writing, `GROQ_MODEL` for answers), budget reservation, token
-accounting from provider usage, error classification with ≤ 3 jittered
-attempts for retryable errors, optional cache for temperature-0 calls, and a
-deterministic `fake` provider for tests and benchmarks.
+(blocking SDK call in a worker thread), model tiers (`GROQ_MODEL_FAST` =
+`openai/gpt-oss-20b` for routing/code/SQL writing, `GROQ_MODEL` =
+`openai/gpt-oss-120b` for answers; reasoning effort per tier), budget
+reservation (in-flight output tokens are reserved, so parallel steps cannot
+jointly overshoot the run budget), token accounting from provider usage,
+error classification with ≤ 3 jittered attempts for retryable errors (rate
+limits honour `Retry-After`), a clear non-retryable error plus an optional
+`GROQ_FALLBACK_MODEL` when a model is decommissioned, and a deterministic
+`fake` provider for tests and benchmarks.
+
+### Reproducibility
+
+`LLM_DETERMINISTIC=true` (default) makes every model call temperature 0 with
+a fixed `LLM_SEED`, and routes it through the response cache (in memory, or
+Redis when `REDIS_URL` is set so all replicas share it; `LLM_CACHE_TTL_SECONDS=0`
+never expires). Identical prompts that are in flight at the same moment share
+one provider call (single-flight), so concurrent identical requests also get
+the same answer. The cache is what makes answers reproducible: measured on
+Groq, temperature 0 + seed still produced different wording for long answers
+(see [EVALUATION.md](EVALUATION.md#determinism)). Everything outside the model
+is deterministic by construction: routing, planning, DAG scheduling (results
+are keyed by step, never by completion order), aggregation, evaluation,
+vector-search ranking (stable tie-breaks for equal scores), chunk ids,
+artifact names (content-addressed) and the sandbox (`random` seeded,
+`PYTHONHASHSEED=0`, newlines normalized). A request's own earlier memory is
+never injected back into it, so repeating a request does not change its
+prompt. Legitimate differences remain: conversation history and long-term
+memory from *other* requests are inputs, live web pages change over time,
+and timeouts depend on wall-clock time.
 
 ## Observability
 

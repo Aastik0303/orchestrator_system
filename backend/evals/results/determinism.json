@@ -1,0 +1,1141 @@
+{
+  "recorded_at": "2026-09-26T08:01:36Z",
+  "real_llm": false,
+  "keep_cache": false,
+  "runs": 5,
+  "settings": {
+    "llm_provider": "fake",
+    "llm_deterministic": true
+  },
+  "agents": {
+    "cases": {
+      "general_chat": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "f73dfec7b1ed",
+          "f73dfec7b1ed",
+          "f73dfec7b1ed",
+          "f73dfec7b1ed",
+          "f73dfec7b1ed"
+        ],
+        "differing_fields": {},
+        "agent": "general_chat",
+        "raised": 0,
+        "uses_llm": true,
+        "temperature": 0.4,
+        "effective_temperature": 0.0,
+        "sample_summary": "Answer d16ac7f431764294. User request: Explain what a hash map is in two sentences.",
+        "correct": true
+      },
+      "deep_research": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "d576bb63a70a",
+          "d576bb63a70a",
+          "d576bb63a70a",
+          "d576bb63a70a",
+          "d576bb63a70a"
+        ],
+        "differing_fields": {},
+        "agent": "deep_research",
+        "raised": 0,
+        "uses_llm": true,
+        "temperature": 0.3,
+        "effective_temperature": 0.0,
+        "sample_summary": "Answer 25c387d3cba7d5f8. User request: Research the current market for solid-state batteries.",
+        "correct": true
+      },
+      "code_dev": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "693beb04e28f",
+          "693beb04e28f",
+          "693beb04e28f",
+          "693beb04e28f",
+          "693beb04e28f"
+        ],
+        "differing_fields": {},
+        "agent": "code_dev",
+        "raised": 0,
+        "uses_llm": true,
+        "temperature": 0.2,
+        "effective_temperature": 0.0,
+        "sample_summary": "Answer 9a4389219b974a3d. User request: Write a Python function that reverses a singly linked list.",
+        "correct": true
+      },
+      "code_dev[github]": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "64397d8477dd",
+          "64397d8477dd",
+          "64397d8477dd",
+          "64397d8477dd",
+          "64397d8477dd"
+        ],
+        "differing_fields": {},
+        "agent": "code_dev",
+        "raised": 0,
+        "uses_llm": true,
+        "temperature": 0.2,
+        "effective_temperature": 0.0,
+        "sample_summary": "Answer 7e984ee0165f25a9. User request: Explain the architecture of https://github.com/octo/parcel-tracker Repository sources: <document index=\"1\"",
+        "correct": true
+      },
+      "document_rag": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "5e07e8a23dd1",
+          "5e07e8a23dd1",
+          "5e07e8a23dd1",
+          "5e07e8a23dd1",
+          "5e07e8a23dd1"
+        ],
+        "differing_fields": {},
+        "agent": "document_rag",
+        "raised": 0,
+        "uses_llm": true,
+        "temperature": 0.1,
+        "effective_temperature": 0.0,
+        "sample_summary": "Answer 39c0e8667a8fa94b. Question: How long do refunds take to be issued? Retrieved context: <document index=\"1\" source=\"policy.txt\"> Refund poli",
+        "correct": true
+      },
+      "youtube_rag": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "02a69ce2c6bf",
+          "02a69ce2c6bf",
+          "02a69ce2c6bf",
+          "02a69ce2c6bf",
+          "02a69ce2c6bf"
+        ],
+        "differing_fields": {},
+        "agent": "youtube_rag",
+        "raised": 0,
+        "uses_llm": true,
+        "temperature": 0.2,
+        "effective_temperature": 0.0,
+        "sample_summary": "Answer a9a81a4149a29179. User request: What does https://www.youtube.com/watch?v=dQw4w9WgXcQ say about the pro plan price? Transcript windows: <d",
+        "correct": true
+      },
+      "sql_agent": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "8a5f9c712208",
+          "8a5f9c712208",
+          "8a5f9c712208",
+          "8a5f9c712208",
+          "8a5f9c712208"
+        ],
+        "differing_fields": {},
+        "agent": "sql_agent",
+        "raised": 0,
+        "uses_llm": true,
+        "temperature": 0.0,
+        "effective_temperature": 0.0,
+        "sample_summary": "The query returned 3 rows.\n\n```sql\nSELECT region, SUM(total) AS revenue FROM orders GROUP BY region ORDER BY revenue DESC\n```\n\n| region | revenue |\n| --- | --- |\n| north | 200.0 |\n| east | 150.0 |\n| s",
+        "correct": true
+      },
+      "data_analyst": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "a501e2b7036a",
+          "a501e2b7036a",
+          "a501e2b7036a",
+          "a501e2b7036a",
+          "a501e2b7036a"
+        ],
+        "differing_fields": {},
+        "agent": "data_analyst",
+        "raised": 0,
+        "uses_llm": false,
+        "temperature": null,
+        "effective_temperature": null,
+        "sample_summary": "Analyzed 1 dataset table covering 8 rows. Average data quality was 95.2/100. The strongest numeric relationship was revenue versus orders (+1.00).",
+        "correct": true
+      },
+      "python_executor": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "b9907bc011ce",
+          "b9907bc011ce",
+          "b9907bc011ce",
+          "b9907bc011ce",
+          "b9907bc011ce"
+        ],
+        "differing_fields": {},
+        "agent": "python_executor",
+        "raised": 0,
+        "uses_llm": true,
+        "temperature": 0.0,
+        "effective_temperature": 0.0,
+        "sample_summary": "Sandbox status: **ok**.\n\n```text\n6.5\n\n```",
+        "correct": true
+      },
+      "python_executor[model-written]": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "00599ac0e833",
+          "00599ac0e833",
+          "00599ac0e833",
+          "00599ac0e833",
+          "00599ac0e833"
+        ],
+        "differing_fields": {},
+        "agent": "python_executor",
+        "raised": 0,
+        "uses_llm": true,
+        "temperature": 0.0,
+        "effective_temperature": 0.0,
+        "sample_summary": "No Python code block was provided and no model is available to write one.",
+        "correct": true
+      },
+      "memory": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "e6401097559d",
+          "e6401097559d",
+          "e6401097559d",
+          "e6401097559d",
+          "e6401097559d"
+        ],
+        "differing_fields": {},
+        "agent": "memory",
+        "raised": 0,
+        "uses_llm": false,
+        "temperature": null,
+        "effective_temperature": null,
+        "sample_summary": "Retrieved 1 scoped memory records.",
+        "correct": true
+      },
+      "report_generator": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "2e65bb82ad53",
+          "2e65bb82ad53",
+          "2e65bb82ad53",
+          "2e65bb82ad53",
+          "2e65bb82ad53"
+        ],
+        "differing_fields": {},
+        "agent": "report_generator",
+        "raised": 0,
+        "uses_llm": false,
+        "temperature": null,
+        "effective_temperature": null,
+        "sample_summary": "## Executive Summary\n\nRevenue grew 8% month over month.\n\nThe outdoor market is growing.\n\n## Agent Findings\n\n- East leads revenue.\n- Demand peaks in spring.",
+        "correct": true
+      },
+      "evaluation": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "b69f279eef84",
+          "b69f279eef84",
+          "b69f279eef84",
+          "b69f279eef84",
+          "b69f279eef84"
+        ],
+        "differing_fields": {},
+        "agent": "evaluation",
+        "raised": 0,
+        "uses_llm": false,
+        "temperature": null,
+        "effective_temperature": null,
+        "sample_summary": "Quality score: 90.0/100.",
+        "correct": true
+      }
+    },
+    "agents_without_case": []
+  },
+  "orchestrator": {
+    "conversation": {
+      "isolated": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "e87ce3144d01",
+          "e87ce3144d01",
+          "e87ce3144d01",
+          "e87ce3144d01",
+          "e87ce3144d01"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          329,
+          329,
+          329,
+          329,
+          329
+        ]
+      },
+      "concurrent": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "e87ce3144d01",
+          "e87ce3144d01",
+          "e87ce3144d01",
+          "e87ce3144d01",
+          "e87ce3144d01"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          329,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "same_user": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "e87ce3144d01",
+          "e87ce3144d01",
+          "e87ce3144d01",
+          "e87ce3144d01",
+          "e87ce3144d01"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          329,
+          329,
+          329,
+          329,
+          329
+        ]
+      },
+      "expected_status": "completed",
+      "correct": true,
+      "sample": {
+        "status": "completed",
+        "route": [
+          "conversation"
+        ],
+        "strategy": "capability",
+        "steps": [
+          "agent_general_chat"
+        ],
+        "response": "Answer e45ef087731597e2. User request: hello, what can you help me with?"
+      }
+    },
+    "single_code": {
+      "isolated": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "cb5c2199bfc6",
+          "cb5c2199bfc6",
+          "cb5c2199bfc6",
+          "cb5c2199bfc6",
+          "cb5c2199bfc6"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          415,
+          415,
+          415,
+          415,
+          415
+        ]
+      },
+      "concurrent": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "cb5c2199bfc6",
+          "cb5c2199bfc6",
+          "cb5c2199bfc6",
+          "cb5c2199bfc6",
+          "cb5c2199bfc6"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          415,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "same_user": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "cb5c2199bfc6",
+          "cb5c2199bfc6",
+          "cb5c2199bfc6",
+          "cb5c2199bfc6",
+          "cb5c2199bfc6"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          415,
+          415,
+          415,
+          415,
+          415
+        ]
+      },
+      "expected_status": "completed",
+      "correct": true,
+      "sample": {
+        "status": "completed",
+        "route": [
+          "code_generation"
+        ],
+        "strategy": "capability",
+        "steps": [
+          "agent_code_dev"
+        ],
+        "response": "Answer f13c4a1b561e5026. User request: Write a python function that parses ISO 8601 dates"
+      }
+    },
+    "multi_agent_report": {
+      "isolated": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "dfeea18945d6",
+          "dfeea18945d6",
+          "dfeea18945d6",
+          "dfeea18945d6",
+          "dfeea18945d6"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          890,
+          890,
+          890,
+          890,
+          890
+        ]
+      },
+      "concurrent": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "dfeea18945d6",
+          "dfeea18945d6",
+          "dfeea18945d6",
+          "dfeea18945d6",
+          "dfeea18945d6"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          890,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "same_user": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "dfeea18945d6",
+          "dfeea18945d6",
+          "dfeea18945d6",
+          "dfeea18945d6",
+          "dfeea18945d6"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          890,
+          890,
+          890,
+          890,
+          890
+        ]
+      },
+      "expected_status": "completed",
+      "correct": true,
+      "sample": {
+        "status": "completed",
+        "route": [
+          "code_generation",
+          "web_research",
+          "report_synthesis"
+        ],
+        "strategy": "capability",
+        "steps": [
+          "code_dev_1",
+          "deep_research_2",
+          "evaluation_1",
+          "memory_1",
+          "report_1"
+        ],
+        "response": "## Executive Summary\n\nAnswer 308f90e5bc01fa0b. User request: Analyze this repository architecture and research current patterns, then create a report Your step in the\n\nAnswer d7fd8335620df985. User request: Analyze this repository architecture and research current patterns, then create a report Your"
+      }
+    },
+    "dataset_then_research": {
+      "isolated": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "d9188be13237",
+          "d9188be13237",
+          "d9188be13237",
+          "d9188be13237",
+          "d9188be13237"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          419,
+          419,
+          419,
+          419,
+          419
+        ]
+      },
+      "concurrent": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "d9188be13237",
+          "d9188be13237",
+          "d9188be13237",
+          "d9188be13237",
+          "d9188be13237"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          419,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "same_user": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "d9188be13237",
+          "d9188be13237",
+          "d9188be13237",
+          "d9188be13237",
+          "d9188be13237"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          419,
+          419,
+          419,
+          419,
+          419
+        ]
+      },
+      "expected_status": "completed",
+      "correct": true,
+      "sample": {
+        "status": "completed",
+        "route": [
+          "data_analysis",
+          "report_synthesis",
+          "web_research"
+        ],
+        "strategy": "rule",
+        "steps": [
+          "data_analyst_1",
+          "deep_research_2",
+          "evaluation_1",
+          "memory_1",
+          "report_1"
+        ],
+        "response": "## Executive Summary\n\nAnalyzed 1 dataset table covering 8 rows. Average data quality was 95.2/100. The strongest numeric relationship was revenue versus orders (+1.00).\n\nAnswer ff151aec30cb9021. User request: Analyze this CSV and research the outdoor market, then create a report Your step in the pla"
+      }
+    },
+    "document_question": {
+      "isolated": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "f3a46261f7b3",
+          "f3a46261f7b3",
+          "f3a46261f7b3",
+          "f3a46261f7b3",
+          "f3a46261f7b3"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          509,
+          509,
+          509,
+          509,
+          509
+        ]
+      },
+      "concurrent": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "f3a46261f7b3",
+          "f3a46261f7b3",
+          "f3a46261f7b3",
+          "f3a46261f7b3",
+          "f3a46261f7b3"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          0,
+          509,
+          0,
+          0,
+          0
+        ]
+      },
+      "same_user": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "f3a46261f7b3",
+          "f3a46261f7b3",
+          "f3a46261f7b3",
+          "f3a46261f7b3",
+          "f3a46261f7b3"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          509,
+          509,
+          509,
+          509,
+          509
+        ]
+      },
+      "expected_status": "completed",
+      "correct": true,
+      "sample": {
+        "status": "completed",
+        "route": [
+          "document_retrieval"
+        ],
+        "strategy": "rule",
+        "steps": [
+          "agent_document_rag"
+        ],
+        "response": "Answer e3c86dbd1d0675b3. Question: According to the policy document, how long do refunds take? Retrieved context: <document index=\"1\" source=\"pol\n\n- Retrieved 1 chunks with similarity scores from 0.35 to 0.35.\n\n> The answer does not cite the retrieved sources; verify it against the evidence.\n> Low e"
+      }
+    },
+    "sandbox_approved": {
+      "isolated": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "2f834b219c07",
+          "2f834b219c07",
+          "2f834b219c07",
+          "2f834b219c07",
+          "2f834b219c07"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "concurrent": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "2f834b219c07",
+          "2f834b219c07",
+          "2f834b219c07",
+          "2f834b219c07",
+          "2f834b219c07"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "same_user": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "2f834b219c07",
+          "2f834b219c07",
+          "2f834b219c07",
+          "2f834b219c07",
+          "2f834b219c07"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "expected_status": "completed",
+      "correct": true,
+      "sample": {
+        "status": "completed",
+        "route": [
+          "python_execution"
+        ],
+        "strategy": "capability",
+        "steps": [
+          "agent_python_executor"
+        ],
+        "response": "Sandbox status: **ok**.\n\n```text\n285\n\n```"
+      }
+    },
+    "sandbox_needs_approval": {
+      "isolated": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "f148a62066e8",
+          "f148a62066e8",
+          "f148a62066e8",
+          "f148a62066e8",
+          "f148a62066e8"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "concurrent": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "f148a62066e8",
+          "f148a62066e8",
+          "f148a62066e8",
+          "f148a62066e8",
+          "f148a62066e8"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "same_user": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "f148a62066e8",
+          "f148a62066e8",
+          "f148a62066e8",
+          "f148a62066e8",
+          "f148a62066e8"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "expected_status": "blocked",
+      "correct": true,
+      "sample": {
+        "status": "blocked",
+        "route": [
+          "python_execution"
+        ],
+        "strategy": "capability",
+        "steps": [
+          "agent_python_executor"
+        ],
+        "response": "The workflow could not complete:\n- Python Executor: BLOCKED (SECURITY) - requires your approval to use `sandbox.python_exec` (resend with approved_tools including it)"
+      }
+    },
+    "blocked_injection": {
+      "isolated": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "a48dcbaaae5b",
+          "a48dcbaaae5b",
+          "a48dcbaaae5b",
+          "a48dcbaaae5b",
+          "a48dcbaaae5b"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "concurrent": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "a48dcbaaae5b",
+          "a48dcbaaae5b",
+          "a48dcbaaae5b",
+          "a48dcbaaae5b",
+          "a48dcbaaae5b"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "same_user": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "a48dcbaaae5b",
+          "a48dcbaaae5b",
+          "a48dcbaaae5b",
+          "a48dcbaaae5b",
+          "a48dcbaaae5b"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "expected_status": "blocked",
+      "correct": true,
+      "sample": {
+        "status": "blocked",
+        "route": null,
+        "strategy": null,
+        "steps": [],
+        "response": "I can't follow instructions that try to override the platform's rules. I can't share my internal instructions or configuration. If you have a legitimate task, rephrase it without that part and I'll help."
+      }
+    },
+    "ambiguous_llm_routing": {
+      "isolated": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "bcd08f03d1eb",
+          "bcd08f03d1eb",
+          "bcd08f03d1eb",
+          "bcd08f03d1eb",
+          "bcd08f03d1eb"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          621,
+          621,
+          621,
+          621,
+          621
+        ]
+      },
+      "concurrent": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "bcd08f03d1eb",
+          "bcd08f03d1eb",
+          "bcd08f03d1eb",
+          "bcd08f03d1eb",
+          "bcd08f03d1eb"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          621,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "same_user": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "bcd08f03d1eb",
+          "bcd08f03d1eb",
+          "bcd08f03d1eb",
+          "bcd08f03d1eb",
+          "bcd08f03d1eb"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          621,
+          621,
+          621,
+          621,
+          621
+        ]
+      },
+      "expected_status": "completed",
+      "correct": true,
+      "sample": {
+        "status": "completed",
+        "route": [
+          "conversation"
+        ],
+        "strategy": "fallback",
+        "steps": [
+          "agent_general_chat"
+        ],
+        "response": "Answer d65c2e1da521250d. User request: Could you take a look at the numbers for next quarter's plan please"
+      }
+    },
+    "github_repository": {
+      "isolated": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "f318587abc25",
+          "f318587abc25",
+          "f318587abc25",
+          "f318587abc25",
+          "f318587abc25"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          622,
+          622,
+          622,
+          622,
+          622
+        ]
+      },
+      "concurrent": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "f318587abc25",
+          "f318587abc25",
+          "f318587abc25",
+          "f318587abc25",
+          "f318587abc25"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          0,
+          0,
+          0,
+          0,
+          622
+        ]
+      },
+      "same_user": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "f318587abc25",
+          "f318587abc25",
+          "f318587abc25",
+          "f318587abc25",
+          "f318587abc25"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          622,
+          622,
+          622,
+          622,
+          622
+        ]
+      },
+      "expected_status": "completed",
+      "correct": true,
+      "sample": {
+        "status": "completed",
+        "route": [
+          "code_generation"
+        ],
+        "strategy": "capability",
+        "steps": [
+          "code_dev_1",
+          "evaluation_1",
+          "memory_1",
+          "report_1"
+        ],
+        "response": "## Executive Summary\n\nAnswer 09636e5f75015d17. User request: Explain the architecture of https://github.com/octo/parcel-tracker Your step in the plan: explain the arch\n\n## Sources\n\n1. octo/parcel-tracker overview and README: https://github.com/octo/parcel-tracker\n2. octo/parcel-tracker/pyproject.tom"
+      }
+    },
+    "youtube_question": {
+      "isolated": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "054077801aa7",
+          "054077801aa7",
+          "054077801aa7",
+          "054077801aa7",
+          "054077801aa7"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          550,
+          550,
+          550,
+          550,
+          550
+        ]
+      },
+      "concurrent": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "054077801aa7",
+          "054077801aa7",
+          "054077801aa7",
+          "054077801aa7",
+          "054077801aa7"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          550,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "same_user": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "054077801aa7",
+          "054077801aa7",
+          "054077801aa7",
+          "054077801aa7",
+          "054077801aa7"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          550,
+          550,
+          550,
+          550,
+          550
+        ]
+      },
+      "expected_status": "completed",
+      "correct": true,
+      "sample": {
+        "status": "completed",
+        "route": [
+          "youtube_transcript"
+        ],
+        "strategy": "rule",
+        "steps": [
+          "agent_youtube_rag"
+        ],
+        "response": "Answer dbc38056b738cadc. User request: What does https://youtu.be/dQw4w9WgXcQ say about the pro plan price? Transcript windows: <document index=\"\n\n> The answer does not cite the retrieved sources; verify it against the evidence."
+      }
+    },
+    "sql_query": {
+      "isolated": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "9ebe2d4392e8",
+          "9ebe2d4392e8",
+          "9ebe2d4392e8",
+          "9ebe2d4392e8",
+          "9ebe2d4392e8"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "concurrent": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "9ebe2d4392e8",
+          "9ebe2d4392e8",
+          "9ebe2d4392e8",
+          "9ebe2d4392e8",
+          "9ebe2d4392e8"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "same_user": {
+        "deterministic": true,
+        "distinct_outputs": 1,
+        "fingerprints": [
+          "9ebe2d4392e8",
+          "9ebe2d4392e8",
+          "9ebe2d4392e8",
+          "9ebe2d4392e8",
+          "9ebe2d4392e8"
+        ],
+        "differing_fields": {},
+        "tokens": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "expected_status": "completed",
+      "correct": true,
+      "sample": {
+        "status": "completed",
+        "route": [
+          "sql_query"
+        ],
+        "strategy": "capability",
+        "steps": [
+          "agent_sql_agent"
+        ],
+        "response": "The query returned 3 rows.\n\n```sql\nSELECT region, COUNT(*) AS orders FROM orders GROUP BY region ORDER BY region\n```\n\n| region | orders |\n| --- | --- |\n| east | 1 |\n| north | 2 |\n| south | 1 |\n\n- Columns: region, orders."
+      }
+    }
+  },
+  "non_deterministic": [],
+  "passed": true
+}

@@ -44,6 +44,13 @@ os.environ.update(
         "LOG_LEVEL": "CRITICAL",
         "WORKER_MODE": "inprocess",
         "ROUTER_LLM_ENABLED": "true",
+        # Network adapters are off unless a test enables them with a mock.
+        "WEB_FETCH_ENABLED": "false",
+        "WEB_SEARCH_API_KEY": "",
+        "GITHUB_ENABLED": "false",
+        "GITHUB_TOKEN": "",
+        "YOUTUBE_TRANSCRIPTS_ENABLED": "false",
+        "SQL_AGENT_DATABASE_URL": "",
     }
 )
 

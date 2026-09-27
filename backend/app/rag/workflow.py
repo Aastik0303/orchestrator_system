@@ -10,12 +10,16 @@ is wrapped in <document> tags, and instruction-bearing chunks never reach it.
 
 from __future__ import annotations
 
+import asyncio
+import re
+from pathlib import Path
 from typing import Any, Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
 from app.agents.prompts import system_prompt
 from app.guardrails.retrieval_guard import (
+    WORD_RE,
     build_context,
     faithfulness_score,
     sanitize_retrieved_chunks,
@@ -31,6 +35,27 @@ RAG_ROLE = (
     "of guessing."
 )
 INSUFFICIENT_ANSWER = "No sufficiently relevant indexed document evidence was found for this question."
+# Chunks retrieved from documents the user attached (the context character
+# budget still bounds the prompt). Small files such as a resume fit entirely.
+ATTACHED_DOCUMENT_TOP_K = 10
+# With nothing attached and nothing above the similarity threshold, a question
+# routed here ("summarize that doc", "who is X from the doc") is assumed to be
+# about the user's most recent uploads. Text documents are preferred over
+# datasets, which are indexed too.
+RECENT_DOCUMENT_FALLBACK = 3
+TEXT_DOCUMENT_EXTENSIONS = {".pdf", ".docx", ".md", ".txt"}
+# The fallback is used only when the question points at a document or shares
+# a content word with the fallback chunks (a name, "skills", ...), so
+# off-topic questions still get the insufficient-evidence answer.
+DOCUMENT_REFERENCE_RE = re.compile(
+    r"(?<![a-z0-9])(?:docs?|documents?|files?|pdfs?|docx|resumes?|cv|uploads?|uploaded|attached|attachments?)(?![a-z0-9])"
+)
+FALLBACK_STOPWORDS = {
+    "what", "which", "that", "this", "these", "those", "does", "from", "have", "with", "about", "their",
+    "there", "when", "where", "give", "tell", "please", "show", "explain", "some", "more", "into", "your",
+    "will", "would", "could", "should", "been", "were", "they", "them", "than", "then", "also", "just",
+    "only", "over", "like", "know", "much", "many",
+}
 
 
 class DocumentRagState(TypedDict, total=False):
@@ -51,12 +76,57 @@ def _ctx(config: dict[str, Any]):
     return config["configurable"]["agent_ctx"]
 
 
+def _recent_documents(run) -> list[dict[str, Any]]:
+    documents = [
+        document
+        for document in run.store.list_documents(user_id=run.user_id, project_id=run.project_id)  # newest first
+        if document["status"] == "indexed"
+    ]
+    text_documents = [
+        document for document in documents if Path(document["name"]).suffix.lower() in TEXT_DOCUMENT_EXTENSIONS
+    ]
+    return (text_documents or documents)[:RECENT_DOCUMENT_FALLBACK]
+
+
+def _fallback_applies(question: str, chunks: list[dict[str, Any]]) -> bool:
+    question = question.lower()
+    if DOCUMENT_REFERENCE_RE.search(question):
+        return True
+    terms = set(WORD_RE.findall(question)) - FALLBACK_STOPWORDS
+    content_terms = set(WORD_RE.findall(" ".join(chunk.get("content", "") for chunk in chunks).lower()))
+    return bool(terms & content_terms)
+
+
 async def _retrieve(state: DocumentRagState, config) -> dict[str, Any]:
-    arguments: dict[str, Any] = {"query": state["question"][:4000]}
+    ctx = _ctx(config)
+    query = state["question"][:4000]
     if state.get("document_ids"):
-        arguments["document_ids"] = state["document_ids"]
-    chunks = await _ctx(config).call_tool("vector.search_chunks", arguments)
-    return {"retrieved_chunks": chunks}
+        chunks = await ctx.call_tool(
+            "vector.search_chunks",
+            {"query": query, "document_ids": state["document_ids"], "top_k": ATTACHED_DOCUMENT_TOP_K},
+        )
+        return {"retrieved_chunks": chunks}
+    chunks = await ctx.call_tool("vector.search_chunks", {"query": query})
+    if chunks:
+        return {"retrieved_chunks": chunks}
+    recent = await asyncio.to_thread(_recent_documents, ctx.run)
+    if not recent:
+        return {"retrieved_chunks": []}
+    document_ids = [document["id"] for document in recent]
+    chunks = await ctx.call_tool(
+        "vector.search_chunks", {"query": query, "document_ids": document_ids, "top_k": ATTACHED_DOCUMENT_TOP_K}
+    )
+    if not _fallback_applies(query, chunks):
+        return {"retrieved_chunks": []}
+    names = ", ".join(document["name"] for document in recent)
+    return {
+        "retrieved_chunks": chunks,
+        "document_ids": document_ids,
+        "warnings": [
+            *state.get("warnings", []),
+            f"No document was attached to this chat; answered from your most recent uploads: {names}.",
+        ],
+    }
 
 
 async def _guard(state: DocumentRagState, config) -> dict[str, Any]:
@@ -77,7 +147,8 @@ def _route_after_guard(state: DocumentRagState) -> Literal["build_context", "ins
 
 
 async def _build_context(state: DocumentRagState, config) -> dict[str, Any]:
-    context, selected = build_context(state["safe_chunks"])
+    per_document = ATTACHED_DOCUMENT_TOP_K if state.get("document_ids") else None
+    context, selected = build_context(state["safe_chunks"], max_chunks_per_document=per_document)
     return {"context": context, "context_chunks": selected}
 
 

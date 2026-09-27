@@ -87,6 +87,24 @@ class ApiTests(ApiTestCase):
         self.assertEqual(ok.status_code, 200)
         self.assertNotIn("storage_path", ok.json()["documents"][0])
 
+    def test_documents_stay_attached_to_follow_up_questions_in_the_chat(self):
+        user = _env.unique("session-docs")
+        headers = {"X-User-Id": user}
+        uploaded = self.client.post(
+            "/api/documents/upload",
+            files={"files": ("resume.txt", b"Skills: Python, FastAPI and LangGraph.", "text/plain")},
+            headers=headers,
+        ).json()["documents"][0]
+        first = self.chat("summarize", user, document_ids=uploaded["id"])
+        self.assertEqual(first.json()["route"]["primary_agent"], "document_rag")
+        follow_up = self.chat("what are my skills?", user, session_id=first.json()["session_id"])
+        self.assertEqual(follow_up.json()["route"]["primary_agent"], "document_rag")
+        self.assertNotIn("No sufficiently relevant", follow_up.json()["response"])
+        # A new chat does not inherit the document; ids of other users are ignored.
+        self.assertEqual(self.chat("what are my skills?", user).json()["route"]["primary_agent"], "general_chat")
+        other = self.chat("summarize", _env.unique("other"), document_ids=uploaded["id"])
+        self.assertEqual(other.json()["route"]["primary_agent"], "general_chat")
+
     def test_background_run_and_durable_stop(self):
         user = _env.unique("bg")
         started = self.client.post("/api/chat/start", data={"message": "hello there"}, headers={"X-User-Id": user})

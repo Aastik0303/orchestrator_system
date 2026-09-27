@@ -48,6 +48,10 @@ class Budget:
     tokens_used: int = 0
     retries: int = 0
     llm_calls: int = 0
+    # Output tokens reserved by in-flight LLM calls. Parallel steps see each
+    # other's reservations, so concurrent calls cannot jointly overshoot the
+    # run's token budget.
+    tokens_reserved: int = 0
 
     # All mutations happen on the event loop thread (agents running in worker
     # threads report usage back through async wrappers), so plain integer
@@ -63,7 +67,7 @@ class Budget:
 
     @property
     def remaining_tokens(self) -> int:
-        return max(0, self.limits.max_tokens - self.tokens_used)
+        return max(0, self.limits.max_tokens - self.tokens_used - self.tokens_reserved)
 
     def check_runtime(self) -> None:
         if self.remaining_seconds <= 0:
@@ -104,7 +108,14 @@ class Budget:
                 details={"limit": "max_tokens"},
             )
         self.llm_calls += 1
-        return max(1, min(requested_tokens, self.remaining_tokens))
+        allowed = max(1, min(requested_tokens, self.remaining_tokens))
+        self.tokens_reserved += allowed
+        return allowed
+
+    def release_reservation(self, tokens: int) -> None:
+        """Return a reservation once its call finished (usage is recorded
+        separately with `record_tokens`)."""
+        self.tokens_reserved = max(0, self.tokens_reserved - max(0, int(tokens)))
 
     def record_tokens(self, tokens: int) -> None:
         self.tokens_used += max(0, int(tokens))

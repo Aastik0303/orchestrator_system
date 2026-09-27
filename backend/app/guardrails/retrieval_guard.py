@@ -58,17 +58,23 @@ def _fingerprint(text: str) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", text.lower())[:40])
 
 
-def build_context(chunks: list[dict[str, Any]], *, max_chars: int | None = None) -> tuple[str, list[dict[str, Any]]]:
+def build_context(
+    chunks: list[dict[str, Any]],
+    *,
+    max_chars: int | None = None,
+    max_chunks_per_document: int | None = None,
+) -> tuple[str, list[dict[str, Any]]]:
     """Select chunks (best first) within the context budget and render them."""
     settings = get_settings()
     budget = max_chars or settings.rag_max_context_chars
+    per_document_cap = max_chunks_per_document or settings.rag_max_chunks_per_document
     per_document: dict[str, int] = {}
     seen: set[str] = set()
     selected: list[dict[str, Any]] = []
     used = 0
     for chunk in sorted(chunks, key=lambda item: item.get("similarity", 0), reverse=True):
         document_id = str(chunk.get("document_id"))
-        if per_document.get(document_id, 0) >= settings.rag_max_chunks_per_document:
+        if per_document.get(document_id, 0) >= per_document_cap:
             continue
         fingerprint = _fingerprint(chunk.get("content", ""))
         if fingerprint in seen:
@@ -96,12 +102,21 @@ def build_context(chunks: list[dict[str, Any]], *, max_chars: int | None = None)
     return rendered, selected
 
 
-CITATION_RE = re.compile(r"\[Source\s+(\d+)\]", re.IGNORECASE)
+# [Source 2] and [Source 2, 1:30] (a locator after the number is kept).
+CITATION_RE = re.compile(r"\[Source\s+(\d+)(?:\s*[,;:][^\]\n]{0,40})?\]", re.IGNORECASE)
+# Models trained on other citation styles write 【Source 2】 or 【Source 2, 1:30】.
+ALT_CITATION_RE = re.compile(r"【\s*Source\s+(\d+)\s*((?:[,;:][^】\n]{0,40})?)】", re.IGNORECASE)
 WORD_RE = re.compile(r"[a-z0-9]{4,}")
 
 
+def normalize_citations(answer: str) -> str:
+    return ALT_CITATION_RE.sub(lambda match: f"[Source {match.group(1)}{match.group(2).rstrip()}]", answer)
+
+
 def validate_citations(answer: str, source_count: int) -> tuple[str, list[str]]:
-    """Remove citations to sources that do not exist; report uncited answers."""
+    """Normalize citation style, remove citations to sources that do not
+    exist, and report uncited answers."""
+    answer = normalize_citations(answer)
     warnings: list[str] = []
     invalid = sorted({int(number) for number in CITATION_RE.findall(answer) if not 1 <= int(number) <= source_count})
     if invalid:

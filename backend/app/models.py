@@ -83,6 +83,9 @@ class ChatRequest(BaseModel):
     user_id: str = "local-user"
     project_id: str = "default"
     files: list[UploadedFile] = Field(default_factory=list)
+    # Documents attached earlier in this chat session. Used when the current
+    # message attaches none, so follow-up questions stay grounded in them.
+    session_files: list[UploadedFile] = Field(default_factory=list)
     # Tools the user explicitly approved for this request (e.g. sandbox execution).
     approved_tools: list[str] = Field(default_factory=list)
 

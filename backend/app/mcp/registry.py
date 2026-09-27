@@ -21,7 +21,7 @@ import pandas as pd
 from pydantic import BaseModel, Field, ValidationError
 
 from app.config import get_settings
-from app.core.errors import InvalidInputError, StepTimeoutError, ToolError
+from app.core.errors import InvalidInputError, OrchestratorError, StepTimeoutError, ToolError
 from app.mcp.permissions import enforce_permission
 from app.mcp.schemas import RiskLevel, ToolContext, ToolDefinition, ToolPermission
 from app.observability.telemetry import current_telemetry
@@ -31,29 +31,52 @@ if TYPE_CHECKING:
     from app.agents.registry import AgentSpec
 
 ToolHandler = Callable[[Any, ToolContext], Any | Awaitable[Any]]
+StatusProbe = Callable[[], str]
 
 
 class MCPRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, ToolDefinition] = {}
         self._handlers: dict[str, ToolHandler] = {}
+        # Tools whose availability depends on configuration are probed when
+        # used, not frozen at import time.
+        self._status_probes: dict[str, StatusProbe] = {}
         # Per-process observability counters (not used for any decision).
         self._stats: dict[str, dict[str, Any]] = {}
 
-    def register(self, definition: ToolDefinition, handler: ToolHandler | None = None) -> None:
+    def register(
+        self, definition: ToolDefinition, handler: ToolHandler | None = None, *, status: StatusProbe | None = None
+    ) -> None:
         qualified_name = definition.qualified_name
         if handler is None and definition.status == "available":
             definition.status = "not_implemented"
         self._tools[qualified_name] = definition
         if handler:
             self._handlers[qualified_name] = handler
+        if status is not None and handler is not None:
+            self._status_probes[qualified_name] = status
         self._stats.setdefault(
             qualified_name,
             {"calls": 0, "successes": 0, "total_latency_ms": 0, "last_used": None},
         )
 
     def get(self, tool_name: str) -> ToolDefinition | None:
-        return self._tools.get(tool_name)
+        tool = self._tools.get(tool_name)
+        if tool is not None:
+            self._refresh(tool)
+        return tool
+
+    def is_available(self, tool_name: str) -> bool:
+        tool = self.get(tool_name)
+        return tool is not None and tool.status == "available" and tool_name in self._handlers
+
+    def _refresh(self, tool: ToolDefinition) -> None:
+        probe = self._status_probes.get(tool.qualified_name)
+        if probe is not None:
+            try:
+                tool.status = probe()
+            except Exception:
+                tool.status = "not_configured"
 
     async def execute(
         self,
@@ -63,7 +86,7 @@ class MCPRegistry:
         context: ToolContext,
         agent: "AgentSpec | None" = None,
     ) -> dict[str, Any]:
-        tool = self._tools.get(tool_name)
+        tool = self.get(tool_name)
         if not tool:
             raise InvalidInputError(f"Unknown tool: {tool_name}")
         enforce_permission(tool, arguments, context, agent)
@@ -105,7 +128,7 @@ class MCPRegistry:
             )
         except asyncio.TimeoutError:
             raise StepTimeoutError(f"Tool {tool.qualified_name} timed out after {tool.timeout_seconds}s.") from None
-        except (PermissionError, InvalidInputError, ToolError, StepTimeoutError):
+        except (PermissionError, OrchestratorError):
             raise
         except (FileNotFoundError, ValueError, KeyError) as exc:
             raise InvalidInputError(f"{tool.qualified_name}: {exc}") from None
@@ -124,8 +147,10 @@ class MCPRegistry:
             "web": "Web MCP",
             "data": "Data MCP",
             "sandbox": "Sandbox",
+            "youtube": "YouTube",
         }
         for qualified_name, tool in self._tools.items():
+            self._refresh(tool)
             stats = self._stats[qualified_name]
             server = servers.setdefault(
                 tool.server,
@@ -200,10 +225,6 @@ class SearchMemoryInput(BaseModel):
 
 class PythonExecInput(BaseModel):
     code: str = Field(min_length=1, max_length=20_000)
-
-
-class WebSearchInput(BaseModel):
-    query: str = Field(min_length=1, max_length=500)
 
 
 # ---------------------------------------------------------------- handlers
@@ -358,27 +379,38 @@ def _python_exec(arguments: PythonExecInput, context: ToolContext) -> dict[str, 
         timeout_seconds=settings.sandbox_timeout_seconds,
         memory_mb=settings.sandbox_memory_mb,
         max_output_bytes=settings.sandbox_max_output_bytes,
+        random_seed=settings.llm_seed if settings.sandbox_deterministic else None,
     ).to_dict()
 
 
 def _register_tools() -> MCPRegistry:
-    import os
+    from app.mcp import github, sql, web, youtube
 
     registry = MCPRegistry()
-    github_status = "available" if os.getenv("GITHUB_TOKEN") else "not_configured"
-    web_status = "available" if os.getenv("WEB_SEARCH_API_KEY") else "not_configured"
 
-    for name in ("read_repository", "list_repository_files", "read_file", "search_code", "list_commits"):
+    github_tools = (
+        ("read_repository", "Read a repository's metadata and README.", github.RepositoryInput, github.read_repository, github.read_available),
+        ("list_repository_files", "List a repository's files.", github.RepositoryTreeInput, github.list_repository_files, github.read_available),
+        ("read_file", "Read one text file from a repository.", github.RepositoryFileInput, github.read_file, github.read_available),
+        ("search_code", "Search code in a repository (needs GITHUB_TOKEN).", github.CodeSearchInput, github.search_code, github.search_available),
+        ("list_commits", "List a repository's recent commits.", github.CommitsInput, github.list_commits, github.read_available),
+    )
+    for name, description, input_model, handler, probe in github_tools:
         registry.register(
             ToolDefinition(
                 name=name,
                 server="github",
-                description=f"Read-only GitHub operation: {name.replace('_', ' ')}.",
+                description=f"Read-only GitHub: {description}",
                 permission=ToolPermission.ALLOWED,
                 required_permissions=["github:read"],
-                status=github_status,
-            )
+                timeout_seconds=20,
+                input_model=input_model,
+            ),
+            handler,
+            status=probe,
         )
+    # Write operations stay declared-only: they need a reviewed, approval-gated
+    # implementation before an agent may change a repository.
     for name in ("create_issue", "create_branch", "create_pull_request"):
         registry.register(
             ToolDefinition(
@@ -388,7 +420,7 @@ def _register_tools() -> MCPRegistry:
                 permission=ToolPermission.APPROVAL_REQUIRED,
                 risk_level=RiskLevel.HIGH,
                 required_permissions=["github:write"],
-                status=github_status,
+                status="not_implemented",
                 read_only=False,
             )
         )
@@ -402,8 +434,12 @@ def _register_tools() -> MCPRegistry:
     registry.register(ToolDefinition(name="delete_document", server="vector", description="Delete one of the caller's documents and its vectors.", permission=ToolPermission.APPROVAL_REQUIRED, risk_level=RiskLevel.HIGH, required_permissions=["vector:write"], read_only=False, input_model=DocumentRef), _vector_delete)
     registry.register(ToolDefinition(name="store_memory", server="vector", description="Store scoped long-term memory (sensitive content is rejected).", permission=ToolPermission.ALLOWED, required_permissions=["memory:write"], read_only=False, input_model=StoreMemoryInput), _store_memory)
     registry.register(ToolDefinition(name="search_memory", server="vector", description="Search the caller's scoped long-term memory.", permission=ToolPermission.ALLOWED, required_permissions=["memory:read"], timeout_seconds=15, input_model=SearchMemoryInput, output_schema={"type": "array"}), _search_memory)
-    for name in ("web_search", "fetch_page", "extract_content"):
-        registry.register(ToolDefinition(name=name, server="web", description=f"Web operation: {name.replace('_', ' ')}.", permission=ToolPermission.ALLOWED, required_permissions=["web:read"], status=web_status, input_model=WebSearchInput if name == "web_search" else None))
+    registry.register(ToolDefinition(name="web_search", server="web", description="Search the web (Tavily, Brave, SerpAPI, or Google Custom Search).", permission=ToolPermission.ALLOWED, required_permissions=["web:read"], timeout_seconds=20, input_model=web.WebSearchInput, output_schema={"type": "array"}), web.web_search, status=web.search_available)
+    for name, description in (("fetch_page", "Fetch a public web page as text (SSRF-guarded)."), ("extract_content", "Extract the readable text of a public web page.")):
+        registry.register(ToolDefinition(name=name, server="web", description=description, permission=ToolPermission.ALLOWED, required_permissions=["web:read"], timeout_seconds=20, input_model=web.FetchPageInput), web.fetch_page, status=web.fetch_available)
+    registry.register(ToolDefinition(name="get_transcript", server="youtube", description="Fetch a YouTube video's transcript by video id.", permission=ToolPermission.ALLOWED, required_permissions=["web:read"], timeout_seconds=30, input_model=youtube.TranscriptInput), youtube.get_transcript, status=youtube.available)
+    registry.register(ToolDefinition(name="sql_schema", server="data", description="Describe the tables the read-only SQL agent may query.", permission=ToolPermission.ALLOWED, required_permissions=["db:read"], timeout_seconds=15, input_model=sql.SqlSchemaInput), sql.sql_schema, status=sql.available)
+    registry.register(ToolDefinition(name="sql_query", server="data", description="Run one validated, row-limited, read-only SQL query.", permission=ToolPermission.ALLOWED, risk_level=RiskLevel.MEDIUM, required_permissions=["db:read"], timeout_seconds=30, input_model=sql.SqlQueryInput), sql.sql_query, status=sql.available)
     registry.register(ToolDefinition(name="inspect_dataset", server="data", description="Inspect one of the caller's CSV/Excel datasets without modifying it.", permission=ToolPermission.ALLOWED, required_permissions=["files:read"], input_model=DocumentRef), _inspect_dataset)
     registry.register(ToolDefinition(name="calculate_statistics", server="data", description="Calculate bounded descriptive statistics.", permission=ToolPermission.ALLOWED, required_permissions=["files:read"], input_model=DocumentRef), _calculate_statistics)
     registry.register(ToolDefinition(name="run_safe_analysis", server="data", description="Run an allowlisted data analysis operation.", permission=ToolPermission.APPROVAL_REQUIRED, risk_level=RiskLevel.MEDIUM))

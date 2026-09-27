@@ -59,11 +59,19 @@ class RetrievalTests(RagTestCase):
         self.assertIn("FastAPI serves the backend API", prompt)
         self.assertNotIn("sourdough", prompt, "irrelevant document leaked into the context")
 
-    async def test_irrelevant_question_returns_insufficient_evidence_without_llm(self):
-        self.add_document("architecture.txt", "FastAPI serves the backend API.")
+    async def test_no_documents_returns_insufficient_evidence_without_llm(self):
         response, mock = await self.ask("Who won the 1998 football world cup final?")
         self.assertIn("No sufficiently relevant", response.response)
         mock.assert_not_called()
+
+    async def test_weak_match_falls_back_to_most_recent_text_documents(self):
+        self.add_document("netflix.csv", "title,views\nShow A,100\n")
+        self.add_document("resume.txt", "Aastik Mishra. Skills: Python, FastAPI, LangGraph.")
+        response, mock = await self.ask("give the summary of that doc file", "A Python developer [Source 1].")
+        self.assertEqual(response.status, "completed")
+        prompt = mock.call_args.kwargs["user"]
+        self.assertIn("Skills: Python", prompt)
+        self.assertNotIn("Show A", prompt, "datasets are skipped when a text document exists")
 
     async def test_malicious_document_instructions_never_reach_the_model(self):
         self.add_document(
@@ -121,6 +129,15 @@ class RetrievalTests(RagTestCase):
         response, mock = await self.ask("What is the acquisition target?")
         self.assertIn("No sufficiently relevant", response.response)
         mock.assert_not_called()
+
+
+    def test_attached_documents_return_best_chunks_below_the_global_threshold(self):
+        document = self.add_document("resume.txt", "Skills: Python, FastAPI, LangGraph. Education: B.Tech computer science.")
+        question = "Who won the 1998 football world cup final?"
+        common = dict(user_id=self.user, project_id=self.project)
+        self.assertEqual(search_knowledge(question, **common), [])
+        scoped = search_knowledge(question, document_ids=[document["id"]], **common)
+        self.assertEqual([chunk["document_id"] for chunk in scoped], [document["id"]])
 
 
 class ContextBuilderTests(unittest.TestCase):

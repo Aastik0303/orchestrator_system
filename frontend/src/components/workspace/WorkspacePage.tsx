@@ -34,7 +34,7 @@ export function WorkspacePage() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
   const [chatStackError, setChatStackError] = useState<string | null>(null)
-  const [pendingRunFiles, setPendingRunFiles] = useState<File[]>([])
+  const [pendingDocuments, setPendingDocuments] = useState<{ id: string; name: string }[]>([])
   const [workflowOpen, setWorkflowOpen] = useState(false)
   const [workflowFitRequest, setWorkflowFitRequest] = useState(0)
   const [showWorkflowJson, setShowWorkflowJson] = useState(false)
@@ -106,7 +106,7 @@ export function WorkspacePage() {
     setMessages([])
     setActiveSessionId(null)
     setChatStackError(null)
-    setPendingRunFiles([])
+    setPendingDocuments([])
   }
 
   async function handleSelectChat(sessionId: string) {
@@ -147,7 +147,6 @@ export function WorkspacePage() {
 
     const uploadFiles = Array.from(files)
     const documentList = uploadFiles.map(file => file.name).join(', ')
-    setPendingRunFiles(uploadFiles)
     setMessages(currentMessages => [
       ...currentMessages,
       {
@@ -160,6 +159,7 @@ export function WorkspacePage() {
     try {
       const result = await uploadKnowledgeDocuments(uploadFiles)
       setBackendStatus('connected')
+      setPendingDocuments(result.documents.map(document => ({ id: document.id, name: document.name })))
       setMessages(currentMessages => [
         ...currentMessages,
         {
@@ -185,8 +185,8 @@ export function WorkspacePage() {
     if (!task) return
 
     runSocketRef.current?.close()
-    const attachedFiles = pendingRunFiles
-    const attachmentName = attachedFiles.map(file => file.name).join(', ')
+    const attachedDocuments = pendingDocuments
+    const attachmentName = attachedDocuments.map(document => document.name).join(', ')
     setDraft('')
     setWorkflowOpen(true)
     setSelectedNodeId(null)
@@ -198,8 +198,13 @@ export function WorkspacePage() {
 
     try {
       setBackendStatus('connected')
-      const started = await startChatRun({ message: task, files: attachedFiles, sessionId: activeSessionId || undefined })
-      setPendingRunFiles([])
+      const started = await startChatRun({
+        message: task,
+        files: [],
+        documentIds: attachedDocuments.map(document => document.id),
+        sessionId: activeSessionId || undefined,
+      })
+      setPendingDocuments([])
       setActiveSessionId(started.session_id)
       setRun({ id: started.run_id, status: 'queued', nodes: [], edges: [], events: [] })
       let finalized = false

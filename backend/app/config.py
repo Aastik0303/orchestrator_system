@@ -69,11 +69,24 @@ class Settings(BaseModel):
     # Model provider
     llm_provider: str = _env(lambda: _str("LLM_PROVIDER", "groq"))
     groq_api_key: str | None = _env(lambda: _str("GROQ_API_KEY"))
-    groq_model: str = _env(lambda: _str("GROQ_MODEL", "llama-3.3-70b-versatile"))
-    groq_model_fast: str = _env(lambda: _str("GROQ_MODEL_FAST", "llama-3.1-8b-instant"))
-    llm_request_timeout_seconds: float = _env(lambda: _float("LLM_REQUEST_TIMEOUT_SECONDS", 20))
+    # The Llama 3.x defaults were decommissioned by Groq (every call failed
+    # with NotFoundError); gpt-oss models are the current production tier.
+    groq_model: str = _env(lambda: _str("GROQ_MODEL", "openai/gpt-oss-120b"))
+    groq_model_fast: str = _env(lambda: _str("GROQ_MODEL_FAST", "openai/gpt-oss-20b"))
+    # Tried once when the configured model no longer exists at the provider.
+    groq_fallback_model: str | None = _env(lambda: _str("GROQ_FALLBACK_MODEL"))
+    # Reasoning effort for reasoning models (gpt-oss); reasoning tokens count
+    # against max_tokens, so the fast tier (routing, code writing) uses "low".
+    groq_reasoning_effort: str | None = _env(lambda: _str("GROQ_REASONING_EFFORT", "medium"))
+    groq_reasoning_effort_fast: str | None = _env(lambda: _str("GROQ_REASONING_EFFORT_FAST", "low"))
+    llm_request_timeout_seconds: float = _env(lambda: _float("LLM_REQUEST_TIMEOUT_SECONDS", 30))
     llm_max_output_tokens: int = _env(lambda: _int("LLM_MAX_OUTPUT_TOKENS", 1200))
     llm_cache_size: int = _env(lambda: _int("LLM_CACHE_SIZE", 256))
+    llm_cache_ttl_seconds: int = _env(lambda: _int("LLM_CACHE_TTL_SECONDS", 3600))
+    # Reproducible model output: temperature 0, a fixed seed and a response
+    # cache for every call, so the same prompt yields the same answer.
+    llm_deterministic: bool = _env(lambda: _bool("LLM_DETERMINISTIC", True))
+    llm_seed: int = _env(lambda: _int("LLM_SEED", 42))
     fake_llm_latency_ms: int = _env(lambda: _int("FAKE_LLM_LATENCY_MS", 0))
 
     # Persistence and infrastructure
@@ -142,6 +155,34 @@ class Settings(BaseModel):
     sandbox_timeout_seconds: float = _env(lambda: _float("SANDBOX_TIMEOUT_SECONDS", 5))
     sandbox_memory_mb: int = _env(lambda: _int("SANDBOX_MEMORY_MB", 256))
     sandbox_max_output_bytes: int = _env(lambda: _int("SANDBOX_MAX_OUTPUT_BYTES", 20000))
+    # Seed `random` in the sandbox so executed code is reproducible.
+    sandbox_deterministic: bool = _env(lambda: _bool("SANDBOX_DETERMINISTIC", True))
+
+    # External tool adapters
+    web_search_provider: str = _env(lambda: (_str("WEB_SEARCH_PROVIDER", "tavily") or "tavily").lower())
+    web_search_api_key: str | None = _env(
+        lambda: _str("WEB_SEARCH_API_KEY")
+        or _str("SERPAPI_API_KEY")
+        or _str("GOOGLE_SEARCH_API_KEY")
+        or _str("Google_search_api_key")
+    )
+    google_search_engine_id: str | None = _env(lambda: _str("GOOGLE_SEARCH_ENGINE_ID"))
+    # Server-side page fetching (public addresses only; see app/mcp/web.py).
+    web_fetch_enabled: bool = _env(lambda: _bool("WEB_FETCH_ENABLED", True))
+    web_fetch_max_bytes: int = _env(lambda: _int("WEB_FETCH_MAX_BYTES", 1_000_000))
+    web_timeout_seconds: float = _env(lambda: _float("WEB_TIMEOUT_SECONDS", 10))
+    github_enabled: bool = _env(lambda: _bool("GITHUB_ENABLED", True))
+    github_token: str | None = _env(lambda: _str("GITHUB_TOKEN"))
+    github_api_url: str = _env(lambda: _str("GITHUB_API_URL", "https://api.github.com"))
+    youtube_transcripts_enabled: bool = _env(lambda: _bool("YOUTUBE_TRANSCRIPTS_ENABLED", True))
+    youtube_languages: list[str] = _env(
+        lambda: [item.strip() for item in (_str("YOUTUBE_LANGUAGES", "en") or "").split(",") if item.strip()]
+    )
+    # Read-only SQL agent: any SQLAlchemy URL (use a SELECT-only role).
+    sql_agent_database_url: str | None = _env(lambda: _str("SQL_AGENT_DATABASE_URL"))
+    sql_agent_allowed_tables: str | None = _env(lambda: _str("SQL_AGENT_ALLOWED_TABLES"))
+    sql_agent_max_rows: int = _env(lambda: _int("SQL_AGENT_MAX_ROWS", 100))
+    sql_agent_timeout_seconds: float = _env(lambda: _float("SQL_AGENT_TIMEOUT_SECONDS", 10))
 
     # Uploads
     max_upload_size: int = _env(lambda: _int("MAX_UPLOAD_SIZE", 20 * 1024 * 1024))
@@ -171,10 +212,11 @@ class Settings(BaseModel):
     def secret_values(self) -> list[str]:
         """Secrets that must never appear in responses, logs, or events."""
         values = [self.groq_api_key, self.redis_url, self.api_keys]
-        for name in ("GITHUB_TOKEN", "WEB_SEARCH_API_KEY", "POSTGRES_PASSWORD"):
+        for name in ("GITHUB_TOKEN", "WEB_SEARCH_API_KEY", "SERPAPI_API_KEY", "GOOGLE_SEARCH_API_KEY", "Google_search_api_key", "POSTGRES_PASSWORD"):
             values.append(os.getenv(name))
-        if self.database_url and "@" in self.database_url:
-            values.append(self.database_url)
+        for url in (self.database_url, self.sql_agent_database_url):
+            if url and "@" in url:
+                values.append(url)
         return [value for value in values if value and len(value) >= 6]
 
 

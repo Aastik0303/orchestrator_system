@@ -91,7 +91,40 @@ A call is allowed only if:
    `approval_required_for`.
 
 Tools run off the event loop with a hard timeout and consume the run's tool
-budget.
+budget. Tools whose availability depends on configuration (web, GitHub,
+YouTube, SQL) are probed when used, not frozen at import time.
+
+### External tool adapters
+
+Everything these tools return (pages, search results, README/files,
+transcripts) goes through the retrieval guardrail (`agents/common.render_evidence`):
+instruction-bearing content is quarantined, secrets/PII redacted, and the rest
+is wrapped in numbered untrusted `<document>` blocks; citations to sources that
+do not exist are removed.
+
+- **`web.fetch_page` / `web.extract_content`** (`app/mcp/web.py`): http/https
+  on ports 80/443 only, no URL credentials; the host is resolved and **every
+  address must be public** (loopback, private, link-local incl.
+  `169.254.169.254`, reserved, multicast and IPv4-mapped IPv6 are refused);
+  redirects are followed manually and re-validated per hop (max 3); text
+  content types only; 1 MB / 10 s caps. Residual risk: DNS rebinding between
+  validation and connection; restrict egress at the network layer for
+  hostile environments. `WEB_FETCH_ENABLED=false` turns it off.
+- **`web.web_search`**: Tavily, Brave, SerpAPI or Google Custom Search with `WEB_SEARCH_API_KEY`.
+- **GitHub** (`app/mcp/github.py`): read-only, fixed API host, repository and
+  path validated (`owner/name`, no `..`); write tools (issue/branch/PR) are
+  declared but deliberately not implemented.
+- **YouTube** (`app/mcp/youtube.py`): accepts a validated 11-character video id,
+  never a URL.
+- **SQL** (`app/mcp/sql.py`): (1) sqlglot AST check: exactly one query
+  statement; writes, DDL, `SELECT ... INTO`, data-modifying CTEs, PRAGMA and
+  dangerous functions (`load_extension`, `pg_read_file`, `pg_sleep`, `dblink`,
+  ...) rejected; (2) every table must be in `SQL_AGENT_ALLOWED_TABLES` (or the
+  database's user tables, which excludes `sqlite_master`, `pg_catalog`,
+  `information_schema`); (3) the query is regenerated from the AST and
+  row-limited; (4) execution is read-only at the database level
+  (`PRAGMA query_only`, `SET TRANSACTION READ ONLY` + `statement_timeout`) and
+  always rolled back. Use a SELECT-only database role as well.
 
 ## 6. Sandboxed code execution (`app/sandbox/python_runner.py`)
 
@@ -167,5 +200,9 @@ allowlist.
   among several (output guard, tool guard, sandbox, isolation), not the only
   control. `GUARDRAIL_MODE=monitor` plus the security eval suite support tuning.
 - Sandbox isolation limits above.
+- Web fetching validates addresses before connecting; DNS rebinding between
+  the check and the connection is not prevented in-process.
+- The SQL tools rely on the configured database role as the final control;
+  run them with a SELECT-only role.
 - Reporting a vulnerability: open a private security advisory on the
   repository.

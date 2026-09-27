@@ -43,10 +43,11 @@ Recorded 2026-09-25 on the development machine (Windows 11, Python 3.13).
 | | benign false-positive rate (12 benign prompts) | ≤ 0.10 | **0.00** |
 | Performance (in-process, 50 ms simulated LLM) | error rate at c=1/10/25 | 0 | **0** |
 
-Performance suite detail (orchestrator only, no HTTP): p50 74.5 / 221.9 /
-437.1 ms and 13.3 / 34.4 / 35.4 runs/s at concurrency 1 / 10 / 25, ~545 tokens
-per run (fake provider token estimates). End-to-end HTTP numbers are in
-[PERFORMANCE.md](PERFORMANCE.md).
+Performance suite detail (orchestrator only, no HTTP, response cache off so
+every request pays the simulated model latency; re-recorded 2026-09-26): p50
+78.3 / 170.3 / 429.4 ms and 12.5 / 39.1 / 32.8 runs/s at concurrency 1 / 10 /
+25, ~580 tokens per run (fake provider token estimates). End-to-end HTTP
+numbers are in [PERFORMANCE.md](PERFORMANCE.md).
 
 ### What each suite checks
 
@@ -91,6 +92,50 @@ poisoned refund addendum and the secret-bearing onboarding runbook, which are
 topically related and handled by the retrieval guardrail. `RAG_SIMILARITY_THRESHOLD`
 now defaults to **0.30**, which separates the classes; re-calibrate it if you
 change `EMBEDDING_MODEL`.
+
+## Determinism
+
+`python -m evals.determinism` runs every registered agent (the test fails if
+an agent has no case) and 12 orchestrator scenarios N times with the same
+input and compares every output field. Orchestrator modes: **isolated**
+(fresh user per run), **concurrent** (all runs at once, random per-agent
+latency so parallel steps finish in a different order each time) and
+**same_user** (one user, so memory written by earlier runs is visible).
+Identifiers and timings are ignored; token counts are reported separately
+(a cache hit costs 0 tokens). Offline, the fake model answers with a digest
+of the full prompt, so any prompt drift is caught. Scenarios also check the
+expected status/output, so a case cannot pass by failing identically every
+time. `tests/test_determinism.py` runs the offline audit as a regression gate.
+
+### What was found (2026-09-26) and fixed
+
+| Finding | Effect | Fix |
+|---|---|---|
+| Groq decommissioned `llama-3.3-70b-versatile` / `llama-3.1-8b-instant` | **every** LLM call failed (`NotFoundError`); all model agents were broken | defaults `openai/gpt-oss-120b` / `-20b`, clear error, optional `GROQ_FALLBACK_MODEL` |
+| Agent temperatures 0.1-0.4 | real model: `general_chat`, `deep_research`, `code_dev` gave **3 different answers in 3 runs** | `LLM_DETERMINISTIC`: temperature 0 + seed + cache |
+| Temperature 0 + seed is only best-effort at the provider | real model, cache cleared: `deep_research`, `code_dev`, `code_dev[github]` still 3/3 distinct (wording), `document_rag` 2/3 | every call goes through the response cache (Redis-shared) |
+| Concurrent identical prompts all miss the cache | concurrent identical requests could get different answers | single-flight: one provider call, shared result |
+| A run's memory ("Request: X ...") was injected into the next run of X | same request, same user: run 1 and runs 2+ saw different prompts | a request's own memory is excluded (request digest) |
+| `python_executor` put wall-clock ms in the answer; Windows `\r\n` in output | answer text differed every run and per platform | timing moved to metadata, newlines normalized, `random` seeded |
+| `data_analyst` artifact names used `uuid4`; absolute server paths returned; shared output folder | artifacts differed every run; path disclosure | content-addressed names, per-user folder, relative paths |
+| Vector search: unstable sort, unordered candidates; random chunk ids | equal scores (re-uploaded files) could rank/cite differently; re-indexing changed citations | ordered candidates + stable sort + tie-break (NumPy and pgvector); chunk ids derived from document + index |
+| gpt-oss writes `【Source 2, 1:30】` | valid citations reported as missing | citation styles normalized before validation |
+
+### Results after the fixes (3 runs per case)
+
+| Mode | Agents (14 cases) | Orchestrator (12 scenarios × isolated / concurrent / same_user) |
+|---|---|---|
+| Offline (fake model) | 14/14 deterministic | 36/36 deterministic, all expected statuses |
+| Groq, as deployed (`--real-llm --keep-cache`) | 14/14 deterministic | 36/36 deterministic, all expected statuses |
+| Groq, cache cleared before each run (raw model) | model agents with long answers vary in wording | concurrent identical requests: identical (single-flight) |
+
+Reports: `backend/evals/results/determinism.json` (offline) and
+`determinism-real-llm.json`.
+
+What stays legitimately variable: conversation history and memory from other
+requests (they are inputs), live web content, timeouts, and — after a cache
+entry expires or without a shared cache across processes — the model's own
+best-effort sampling.
 
 ## Honest limitations
 

@@ -9,6 +9,7 @@ import _env  # noqa: F401  (must be first)
 import json
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -17,15 +18,22 @@ BACKEND = Path(__file__).resolve().parents[1]
 
 class EvaluationSuiteRegressionTests(unittest.TestCase):
     def test_router_rag_agent_and_security_suites_meet_thresholds(self):
-        completed = subprocess.run(
-            [sys.executable, "-m", "evals.run", "--suite", "router", "--suite", "rag", "--suite", "agent", "--suite", "security"],
-            cwd=BACKEND,
-            capture_output=True,
-            text=True,
-            timeout=600,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        report = json.loads((BACKEND / "evals" / "results" / "latest.json").read_text(encoding="utf-8"))
+        # Written to a temporary file: the committed latest.json (served to the
+        # UI) must not be replaced by a partial run.
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.json"
+            completed = subprocess.run(
+                [
+                    sys.executable, "-m", "evals.run", "--suite", "router", "--suite", "rag", "--suite", "agent",
+                    "--suite", "security", "--output", str(output),
+                ],
+                cwd=BACKEND,
+                capture_output=True,
+                text=True,
+                timeout=600,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            report = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual(completed.returncode, 0, report.get("failures") or completed.stderr[-2000:])
         self.assertTrue(report["passed"])
         self.assertEqual(report["summary"]["security"]["leaks"], 0)

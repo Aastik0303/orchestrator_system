@@ -15,6 +15,7 @@ Rules enforced here:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import Any
 
@@ -24,6 +25,11 @@ from app.rag.service import embedding_service
 from app.services.runtime_store import RuntimeStore, runtime_store
 
 logger = logging.getLogger("orchestrator.memory")
+
+
+def request_digest(text: str) -> str:
+    """Stable identity of a request (whitespace/case-insensitive)."""
+    return hashlib.sha256(" ".join(text.lower().split()).encode("utf-8")).hexdigest()[:16]
 
 
 def retrieve_memory(
@@ -55,6 +61,7 @@ def save_memory_safely(
     memory_type: str = "workflow",
     importance_score: float = 0.65,
     store: RuntimeStore = runtime_store,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     normalized = " ".join(content.split())
     if len(normalized) < 24:
@@ -75,7 +82,7 @@ def save_memory_safely(
         source_session_id=session_id,
         source_run_id=run_id,
         embedding=embedding_service.embed(normalized),
-        metadata={"source": "completed_workflow" if memory_type == "workflow" else "tool"},
+        metadata={"source": "completed_workflow" if memory_type == "workflow" else "tool", **(metadata or {})},
     )
 
 
@@ -88,6 +95,7 @@ def save_workflow_memory(
     session_id: str | None,
     importance_score: float = 0.65,
     store: RuntimeStore = runtime_store,
+    request: str | None = None,
 ) -> dict[str, Any] | None:
     return save_memory_safely(
         content,
@@ -97,4 +105,5 @@ def save_workflow_memory(
         session_id=session_id,
         importance_score=importance_score,
         store=store,
+        metadata={"request_digest": request_digest(request)} if request else None,
     )

@@ -28,7 +28,8 @@ class DataAnalystTests(unittest.TestCase):
             self.assertLess(result.metadata["average_quality_score"], 100)
             self.assertTrue(any("correlation" in finding for finding in result.findings))
             self.assertTrue(any("duplicate" in item for item in result.recommendations))
-            profile = json.loads(Path(result.artifacts[0]["path"]).read_text(encoding="utf-8"))
+            self.assertFalse(Path(result.artifacts[0]["path"]).is_absolute(), "server paths must not leak")
+            profile = json.loads((root / result.artifacts[0]["path"]).read_text(encoding="utf-8"))
             self.assertEqual(profile["profiles"][0]["rows"], 4)
 
     def test_data_agent_uses_stored_project_dataset_when_no_file_is_attached(self):
@@ -46,6 +47,44 @@ class DataAnalystTests(unittest.TestCase):
                 store.close()
             self.assertEqual(result.metadata["rows_analyzed"], 3)
             self.assertIn("Using 1 stored dataset file", result.findings[0])
+
+    def test_analysis_builds_charts_rendered_as_markdown_blocks(self):
+        from app.agents.visualization import render_chart_blocks, strip_chart_blocks
+        from app.orchestrator.executor import _render_direct_result
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "sales.csv"
+            days = pd.date_range("2024-01-01", periods=90, freq="D")
+            pd.DataFrame(
+                {
+                    "Invoice ID": [f"INV-{index}" for index in range(90)],
+                    "Date": days.strftime("%m/%d/%Y"),
+                    "Product line": ["food", "toys", "tools"] * 30,
+                    "Total": [float(index % 17) * 12.5 + 3 for index in range(90)],
+                    "Units": [index % 23 for index in range(90)],
+                }
+            ).to_csv(source, index=False)
+            request = ChatRequest(message="Visualize Total", files=[UploadedFile(name=source.name, storage_path=str(source))])
+            with patch("app.agents.data_analyst.OUTPUT_DIR", root):
+                first = data_analyst_agent(request)
+                second = data_analyst_agent(request)
+
+        charts = first.metadata["charts"]
+        self.assertEqual(charts, second.metadata["charts"], "charts must be deterministic")
+        by_title = {chart["title"]: chart for chart in charts}
+        self.assertEqual(by_title["Total per week"]["type"], "line")
+        self.assertEqual(sorted(by_title["Total by Product line"]["categories"]), ["food", "tools", "toys"])
+        self.assertEqual(sum(item["count"] for item in by_title["Distribution of Total"]["bins"]), 90)
+        self.assertFalse(any("Invoice ID" in chart["title"] for chart in charts), "identifier columns are not charted")
+
+        text = _render_direct_result(first)
+        self.assertIn("## Visualizations", text)
+        self.assertEqual(text.count("```chart"), len(charts))
+        block = text.split("```chart\n", 1)[1].split("\n```", 1)[0]
+        self.assertEqual(json.loads(block), charts[0])
+        self.assertNotIn("```chart", strip_chart_blocks(text))
+        self.assertEqual(render_chart_blocks([]), "")
 
     def test_missing_dataset_returns_structured_warning(self):
         result = data_analyst_agent(ChatRequest(message="analyze", user_id=_env.unique("nodata")))

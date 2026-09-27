@@ -159,6 +159,9 @@ for name in allowed:
         __import__(name)
     except Exception:
         pass
+if limits.get("random_seed") is not None:
+    import random
+    random.seed(limits["random_seed"])
 code = compile(payload["code"], "<sandbox>", "exec")
 BLOCKED_PREFIXES = ("socket.", "subprocess.", "os.system", "os.exec", "os.spawn", "os.posix_spawn",
     "os.fork", "os.kill", "os.forkpty", "ctypes.", "os.listdir", "os.scandir", "os.remove", "os.unlink",
@@ -261,7 +264,10 @@ def run_python(
     timeout_seconds: float = 5.0,
     memory_mb: int = 256,
     max_output_bytes: int = 20_000,
+    random_seed: int | None = None,
 ) -> SandboxResult:
+    """Run `code` in the sandbox. With `random_seed`, the `random` module is
+    seeded so the same snippet produces the same output."""
     limits = {
         "timeout_seconds": timeout_seconds,
         "memory_mb": memory_mb,
@@ -281,6 +287,7 @@ def run_python(
             "limits": {
                 "memory_bytes": memory_mb * 1024 * 1024,
                 "cpu_seconds": max(1, int(timeout_seconds) + 1),
+                "random_seed": random_seed,
             },
         }
     )
@@ -327,8 +334,10 @@ def run_python(
             if job is not None:
                 job.close()
     duration_ms = int((time.perf_counter() - started) * 1000)
-    out = stdout[:max_output_bytes].decode("utf-8", errors="replace")
-    err = stderr[:max_output_bytes].decode("utf-8", errors="replace")
+    # Normalize newlines: Windows text-mode stdout would otherwise yield
+    # platform-dependent output (CRLF) for the same program.
+    out = stdout[:max_output_bytes].decode("utf-8", errors="replace").replace("\r\n", "\n")
+    err = stderr[:max_output_bytes].decode("utf-8", errors="replace").replace("\r\n", "\n")
     if len(stdout) > max_output_bytes:
         out += "\n[output truncated]"
     if status == "ok" and process.returncode != 0:

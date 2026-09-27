@@ -1611,6 +1611,7 @@ input:focus-visible,
   min-height: 0;
   overflow-y: auto;
   display: grid;
+  grid-auto-rows: max-content;
   align-content: start;
   gap: 8px;
   padding: 12px;
@@ -1629,10 +1630,11 @@ input:focus-visible,
 
 .chat-stack-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 34px;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
-  padding: 0;
+  gap: 4px;
+  min-height: 56px;
+  padding: 0 8px 0 0;
   overflow: hidden;
 }
 
@@ -2996,4 +2998,158 @@ input:focus-visible,
   place-items: center;
   color: var(--app-text-muted);
   font-size: 13px;
+}
+
+/* Data analyst charts (```chart blocks rendered by DataChart) */
+.data-chart {
+  --viz-series: #2a78d6;
+  --viz-positive: #2a78d6;
+  --viz-negative: #e34948;
+  --viz-neutral: #f0efec;
+  --viz-grid: #e6e9ee;
+  --viz-baseline: #c3c8d0;
+  --viz-surface: var(--app-surface-raised);
+  margin: 14px 0;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--viz-surface);
+  padding: 12px 14px 10px;
+  overflow-wrap: normal;
+}
+
+.dark .data-chart {
+  --viz-series: #3987e5;
+  --viz-positive: #3987e5;
+  --viz-negative: #e66767;
+  --viz-neutral: #383835;
+  --viz-grid: #232d3b;
+  --viz-baseline: #3a4658;
+}
+
+.data-chart-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.data-chart-header div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.data-chart-header strong {
+  color: var(--app-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.data-chart-header span {
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.data-chart-toggle {
+  flex: none;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: transparent;
+  padding: 3px 9px;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.data-chart-toggle:hover,
+.data-chart-toggle[aria-pressed='true'] {
+  background: var(--app-surface-muted);
+  color: var(--app-text);
+}
+
+.data-chart-toggle:focus-visible { outline: none; box-shadow: var(--app-ring); }
+
+.data-chart-plot {
+  position: relative;
+  min-height: 40px;
+  overflow-x: auto;
+}
+
+.data-chart-plot svg {
+  display: block;
+  overflow: visible;
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.data-chart-axis text,
+.data-chart-axis-title text {
+  fill: var(--app-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.data-chart-axis-title text { font-size: 11px; font-weight: 500; }
+.data-chart-grid { stroke: var(--viz-grid); stroke-width: 1; }
+.data-chart-baseline { stroke: var(--viz-baseline); stroke-width: 1; }
+.data-chart-label { fill: var(--app-text-muted); font-size: 12px; }
+.data-chart-value { fill: var(--app-text); font-size: 12px; font-variant-numeric: tabular-nums; }
+.data-chart-mark { fill: var(--viz-series); }
+.data-chart-hit:hover .data-chart-mark { fill: color-mix(in oklab, var(--viz-series) 82%, var(--app-text)); }
+.data-chart-line { fill: none; stroke: var(--viz-series); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.data-chart-area { fill: var(--viz-series); fill-opacity: 0.1; }
+.data-chart-crosshair { stroke: var(--viz-baseline); stroke-width: 1; }
+.data-chart-dot { fill: var(--viz-series); stroke: var(--viz-surface); stroke-width: 2; }
+.data-chart-points circle { fill: var(--viz-series); fill-opacity: 0.55; stroke: var(--viz-surface); stroke-width: 1; }
+.data-chart-cell-text { fill: var(--app-text); font-size: 11px; font-variant-numeric: tabular-nums; pointer-events: none; }
+.data-chart-cell-text-inverse { fill: #ffffff; }
+
+.data-chart-tooltip {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  gap: 2px;
+  min-width: 120px;
+  max-width: 220px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface);
+  padding: 6px 9px;
+  box-shadow: var(--app-shadow-md);
+  color: var(--app-text-muted);
+  font-size: 12px;
+  pointer-events: none;
+  transform: translateY(-100%);
+}
+
+.data-chart-tooltip strong {
+  color: var(--app-text);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.data-chart-table {
+  max-height: 320px;
+  overflow: auto;
+}
+
+.markdown-message .data-chart-table table {
+  display: table;
+  width: 100%;
+  margin: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.data-chart-invalid {
+  color: var(--app-text-muted);
+  font-size: 12px;
+  font-style: italic;
+}
+
+@media (forced-colors: active) {
+  .data-chart-mark,
+  .data-chart-dot,
+  .data-chart-points circle { fill: CanvasText; }
+  .data-chart-line { stroke: CanvasText; }
 }

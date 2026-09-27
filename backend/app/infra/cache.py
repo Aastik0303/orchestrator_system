@@ -52,7 +52,9 @@ class MemoryCache:
 
     def set(self, key: str, value: str, ttl_seconds: int) -> None:
         with self._lock:
-            self._items[key] = (time.monotonic() + ttl_seconds, value)
+            # ttl <= 0: never expires (evicted only by the LRU bound).
+            expires_at = time.monotonic() + ttl_seconds if ttl_seconds > 0 else float("inf")
+            self._items[key] = (expires_at, value)
             self._items.move_to_end(key)
             while len(self._items) > self._max_entries:
                 self._items.popitem(last=False)
@@ -99,7 +101,7 @@ class RedisCache:
 
     def set(self, key: str, value: str, ttl_seconds: int) -> None:
         try:
-            self._client.set(self._prefix + key, value, ex=max(1, ttl_seconds))
+            self._client.set(self._prefix + key, value, ex=ttl_seconds if ttl_seconds > 0 else None)
         except Exception as exc:
             logger.warning("redis_cache_set_failed", extra={"error_type": exc.__class__.__name__})
 

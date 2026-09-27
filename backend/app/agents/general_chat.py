@@ -1,17 +1,25 @@
 from __future__ import annotations
 
-from app.agents.common import build_user_prompt, provider_unavailable
+import re
+
+from app.agents.common import build_user_prompt, provider_unavailable, render_evidence
 from app.agents.context import AgentContext
 from app.agents.prompts import system_prompt
 from app.agents.registry import ModelPolicy, PermissionPolicy, RetryPolicy, RoutingHints, register_agent
 from app.core.errors import OrchestratorError
-from app.models import AgentResult, AgentTask
+from app.guardrails.retrieval_guard import validate_citations
+from app.mcp.web import extract_urls
+from app.models import AgentResult, AgentTask, SourceReference
 
 GENERAL_ROLE = "You are the General Chat Agent. Answer clearly and helpfully."
 RESEARCH_ROLE = (
     "You are the Deep Research Agent. Distinguish sourced facts from inference and "
-    "state clearly when live web tools are unavailable."
+    "state clearly when live web tools are unavailable. When <document> sources are "
+    "provided, cite every claim taken from them as [Source N] and never invent sources."
 )
+# Handled by the YouTube and code agents instead of page fetching.
+NOT_WEB_PAGES_RE = re.compile(r"(?:youtube\.com|youtu\.be|github\.com)", re.IGNORECASE)
+MAX_FETCHED_PAGES = 2
 
 
 @register_agent(
@@ -32,45 +40,69 @@ async def general_chat(task: AgentTask, ctx: AgentContext) -> AgentResult:
 
 @register_agent(
     name="deep_research",
-    description="Synthesizes research with explicit source limitations; uses web search when configured.",
+    description="Researches with live sources: reads linked pages and uses web search when configured, with citations.",
     capabilities=["web_research"],
     tools=["web.web_search", "web.fetch_page"],
     timeout_seconds=60,
     retry_policy=RetryPolicy(max_retries=1),
     model_policy=ModelPolicy(tier="quality", temperature=0.3, max_output_tokens=1400),
-    token_budget=6000,
+    token_budget=8000,
     permission_policy=PermissionPolicy(granted_permissions={"web:read"}),
     routing_hints={
         "web_research": RoutingHints(
             description="Research current information, markets, competitors or trends.",
-            url_patterns=[r"https?://(?!(?:www\.)?(?:youtube\.com|youtu\.be))"],
+            url_patterns=[r"https?://(?!(?:www\.)?(?:youtube\.com|youtu\.be|github\.com))"],
         )
     },
 )
 async def deep_research(task: AgentTask, ctx: AgentContext) -> AgentResult:
     warnings: list[str] = []
-    evidence = ""
-    tool = ctx.run.tools.get("web.web_search")
-    if tool is not None and tool.status == "available":
+    items: list[dict] = []
+    tools = ctx.run.tools
+    urls = extract_urls(task.goal, exclude=NOT_WEB_PAGES_RE, limit=MAX_FETCHED_PAGES)
+    if urls and not tools.is_available("web.fetch_page"):
+        warnings.append("Linked pages were not read: page fetching is disabled (WEB_FETCH_ENABLED).")
+    elif urls:
+        for url in urls:
+            try:
+                page = await ctx.call_tool("web.fetch_page", {"url": url, "max_chars": 8000})
+                items.append({"title": page.get("title") or url, "url": page["url"], "content": page.get("content", "")})
+            except (OrchestratorError, PermissionError) as exc:
+                warnings.append(f"Could not read {url} ({exc.__class__.__name__}: {str(exc)[:120]}).")
+    if tools.is_available("web.web_search"):
+        query = " ".join(re.sub(r"https?://\S+", " ", task.instruction or task.goal).split())[:400] or task.goal[:400]
         try:
-            results = await ctx.call_tool("web.web_search", {"query": task.goal[:500]})
-            evidence = str(results)[:4000]
+            for result in await ctx.call_tool("web.web_search", {"query": query, "max_results": 5}):
+                items.append({"title": result.get("title") or result["url"], "url": result["url"], "content": result.get("content", "")})
         except OrchestratorError as exc:
-            warnings.append(f"Web search failed ({exc.error_type.value}); answering without live sources.")
-    else:
-        warnings.append("No live web source was used: the web search tool is not configured.")
+            warnings.append(f"Web search failed ({exc.error_type.value}); answering without search results.")
+    elif not items:
+        warnings.append("No live web source was used: web search credentials or the Google engine ID are not configured.")
+
+    evidence, kept, evidence_warnings = render_evidence(items, ctx)
+    warnings.extend(evidence_warnings)
     prompt = build_user_prompt(task)
     if evidence:
-        from app.agents.prompts import wrap_untrusted
-
-        prompt += "\n\n" + wrap_untrusted("document", evidence, source="web_search")
+        prompt += "\n\nLive sources:\n" + evidence
     response = await ctx.llm(system=system_prompt(RESEARCH_ROLE), user=prompt)
+    sources = [SourceReference(title=item.get("title"), source_type="web", uri=item.get("url")) for item in kept]
     if response is None:
         result = provider_unavailable("Deep research")
         result.warnings.extend(warnings)
+        result.sources = sources
         return result
+    answer = response.text
+    if kept:
+        answer, citation_warnings = validate_citations(answer, len(kept))
+        warnings.extend(citation_warnings)
     return AgentResult(
-        summary=response.text,
-        warnings=warnings,
-        metadata={"model": response.model, "tokens": response.total_tokens, "live_sources": bool(evidence)},
+        summary=answer,
+        sources=sources,
+        warnings=list(dict.fromkeys(warnings)),
+        metadata={
+            "model": response.model,
+            "tokens": response.total_tokens,
+            "live_sources": len(kept),
+            "tool_success": bool(kept) or not (urls or tools.is_available("web.web_search")),
+        },
     )

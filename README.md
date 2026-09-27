@@ -10,10 +10,15 @@ User → API → Input Guardrail → Intent Router → Planner → Execution DAG
 ```
 
 - **Agents** (discoverable by capability): data analysis (CSV/Excel profiling),
-  web research, document RAG with citations, YouTube transcripts (adapter not
-  configured), code generation, sandboxed Python execution (approval required),
-  read-only SQL (disabled until configured), conversation; plus system agents
-  for memory, report aggregation and evaluation.
+  web research (reads linked pages; web search with a Tavily/Brave/SerpAPI key),
+  document RAG with citations, YouTube Q&A from transcripts, code generation
+  with GitHub repository context, sandboxed Python execution (approval
+  required), read-only SQL over a configured database, conversation; plus
+  system agents for memory, report aggregation and evaluation.
+- **Reproducible**: same input, same output. Temperature 0 + fixed seed +
+  shared response cache + single-flight for model calls, and deterministic
+  ordering everywhere else; verified by `python -m evals.determinism` for every
+  agent and the orchestrator (see [EVALUATION](EVALUATION.md#determinism)).
 - **Hybrid routing**: hard rules → capability matching → validated LLM routing.
 - **DAG execution**: parallel independent steps, dependency tracking,
   timeouts, classified retries with backoff + jitter, cancellation, budgets
@@ -62,6 +67,13 @@ Notes:
   than one process writes).
 - Sandboxed execution requires explicit approval per request: send
   `approved_tools=sandbox.python_exec` with the chat request.
+- Models: Groq decommissioned the Llama 3.x defaults this project used
+  (every call returned `NotFoundError`). Defaults are now
+  `openai/gpt-oss-120b` / `openai/gpt-oss-20b`; if your `.env` pins another
+  model, make sure Groq still serves it, or set `GROQ_FALLBACK_MODEL`.
+- External tools: page fetching and public GitHub repositories work without
+  keys; web search needs `WEB_SEARCH_API_KEY`; the SQL agent needs
+  `SQL_AGENT_DATABASE_URL` (use a SELECT-only role). See `.env.example`.
 
 ## Docker
 
@@ -84,8 +96,10 @@ works offline. With `GROQ_API_KEY` in `.env`, the stack calls Groq; set
 
 ```powershell
 cd backend
-..\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"    # 128 tests (unit, integration, security, RAG, API, workers, eval gate)
+..\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"    # 164 tests (unit, integration, security, RAG, API, workers, adapters, eval + determinism gates)
 ..\.venv\Scripts\python.exe -m evals.run                                     # evaluation suites + thresholds
+..\.venv\Scripts\python.exe -m evals.determinism                             # determinism audit: every agent + orchestrator (offline)
+..\.venv\Scripts\python.exe -m evals.determinism --real-llm --keep-cache     # same against Groq, as users get it (costs apply)
 ..\.venv\Scripts\python.exe -m benchmarks.load_test --label local            # load test (1/10/25/50 concurrent)
 ..\.venv\Scripts\python.exe -m benchmarks.micro                              # DAG + retrieval micro-benchmarks
 
@@ -132,7 +146,9 @@ No router, planner or API changes are needed.
 
 See the "limitations" sections of [SECURITY.md](SECURITY.md),
 [PERFORMANCE.md](PERFORMANCE.md) and [EVALUATION.md](EVALUATION.md). In short:
-the sandbox is defense in depth, not kernel-level isolation; web search, GitHub,
-YouTube and SQL adapters are declared but not connected (they need credentials);
-PostgreSQL numbers were measured through Docker Desktop on one machine, not on a
-production network.
+the sandbox is defense in depth, not kernel-level isolation; the model itself
+is only best-effort deterministic, so reproducibility across restarts needs
+the shared cache (`REDIS_URL`) and entries expire after `LLM_CACHE_TTL_SECONDS`
+(0 = never); GitHub write operations are intentionally not implemented; web
+search needs a provider key; PostgreSQL numbers were measured through Docker
+Desktop on one machine, not on a production network.

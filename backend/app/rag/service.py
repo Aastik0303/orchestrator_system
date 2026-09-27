@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import time
@@ -142,7 +143,7 @@ def extract_document(path: Path) -> list[tuple[int | None, str]]:
     if suffix in {".txt", ".md", ".csv"}:
         text = path.read_text(encoding="utf-8", errors="ignore").strip()
         return [(None, text)] if text else []
-    if suffix == ".xlsx":
+    if suffix in {".xlsx", ".xls"}:  # .xls needs xlrd
         import pandas as pd
 
         workbook = pd.read_excel(path, sheet_name=None)
@@ -215,6 +216,10 @@ def index_document(
         )
         if not chunks:
             raise ValueError("Document extraction produced no indexable chunks.")
+        for chunk in chunks:
+            # Stable ids: re-indexing a document keeps its chunk ids (and so
+            # its citations) unchanged.
+            chunk["id"] = "chunk_" + hashlib.sha256(f"{document_id}:{chunk['chunk_index']}".encode()).hexdigest()[:16]
         store.update_document(document_id, status="embedding")
         vectors = embedding_service.embed_documents([chunk["content"] for chunk in chunks])
         for chunk, vector in zip(chunks, vectors, strict=True):
@@ -248,6 +253,11 @@ def search_knowledge(
     Documents indexed with a different embedding model are skipped (and
     reported via `stale_documents`) rather than re-embedded inside the query
     path; re-indexing belongs to the explicit /reindex endpoint or a worker.
+
+    When `document_ids` scopes the search to documents the user attached, the
+    best chunks are always returned: the user is asking about those files, and
+    broad questions ("summarize my resume", "what is his education") score far
+    below the global similarity threshold against every chunk.
     """
     settings = get_settings()
     current_model = embedding_service.model_identifier
@@ -262,6 +272,9 @@ def search_knowledge(
     ]
     if not current_documents:
         return []
+    scoped = bool(document_ids)
+    if threshold is None:
+        threshold = 0.0 if scoped else settings.rag_similarity_threshold
 
     with maybe_span("retrieval", "vector_search", documents=len(current_documents)):
         results = store.search_chunks(
@@ -269,11 +282,11 @@ def search_knowledge(
             user_id=user_id,
             project_id=project_id,
             top_k=top_k or settings.rag_top_k,
-            threshold=settings.rag_similarity_threshold if threshold is None else threshold,
+            threshold=threshold,
             document_ids=[document["id"] for document in current_documents],
             embedding_model=current_model,
         )
-    if results and settings.rag_relative_score_cutoff > 0:
+    if results and settings.rag_relative_score_cutoff > 0 and not scoped:
         best = results[0]["similarity"]
         results = [item for item in results if item["similarity"] >= best * settings.rag_relative_score_cutoff]
     for result in results:
