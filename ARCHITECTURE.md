@@ -71,7 +71,7 @@ Agents and the tools they use:
 | `document_rag` | quality | `vector.search_chunks` (LangGraph RAG subgraph) |
 | `youtube_rag` | quality | `youtube.get_transcript`; timestamped windows, question-relevant selection for long videos |
 | `sql_agent` | fast | `data.sql_schema`, `data.sql_query` (read-only, allowlisted, row-limited; one repair attempt for model-written SQL) |
-| `data_analyst` | none | pandas profiling of CSV/Excel |
+| `data_analyst` | fast (only to plan transformations) | pandas profiling of CSV/Excel; requested transformations (whitelisted JSON operations, rule-parser fallback) are applied and the result is returned as a CSV/XLSX file, downloaded via `GET /api/artifacts/{owner}/{name}` |
 | `python_executor` | fast (only to write code) | `sandbox.python_exec` (approval required) |
 | `memory`, `report_generator`, `evaluation` | none | system agents |
 

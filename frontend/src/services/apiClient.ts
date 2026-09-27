@@ -276,6 +276,20 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
+/** Save a file an agent wrote (e.g. a transformed dataset). Fetched with the
+ * caller's credentials, so it cannot be a plain link. */
+export async function downloadArtifact(path: string, fileName: string) {
+  const encoded = path.split('/').map(encodeURIComponent).join('/')
+  const response = await fetch(`${API_BASE_URL}/api/artifacts/${encoded}`, { headers: authHeaders() })
+  if (!response.ok) throw new Error(response.status === 404 ? 'File is no longer available.' : `Download failed: ${response.status}`)
+  const url = URL.createObjectURL(await response.blob())
+  const link = document.createElement('a')
+  link.href = url
+  link.download = fileName
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
 export function getBackendHealth() {
   return requestJson<{ status: string; database: string; mcp_servers: number }>('/health')
 }

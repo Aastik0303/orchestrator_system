@@ -10,6 +10,14 @@ from typing import Any
 import pandas as pd
 
 from app.agents.context import AgentContext
+from app.agents.data_transform import (
+    apply_operations,
+    parse_plan,
+    planner_prompt,
+    requested_format,
+    rule_based_plan,
+    wants_transform,
+)
 from app.agents.registry import ModelPolicy, PermissionPolicy, RetryPolicy, RoutingHints, register_agent
 from app.agents.visualization import MAX_CHARTS_TOTAL, build_charts
 from app.config import get_settings
@@ -43,34 +51,81 @@ def resolve_artifact(relative_path: str) -> Path:
     name="data_analyst",
     description=(
         "Profiles CSV and Excel data quality, statistics, outliers, and correlations, "
-        "and renders charts (trends, distributions, categories, correlations). Deterministic, no LLM."
+        "renders charts (trends, distributions, categories, correlations), and applies requested "
+        "transformations (cleaning, filtering, sorting, renaming, filling missing values) returning "
+        "the transformed file for download."
     ),
     capabilities=["data_analysis"],
     tools=["data.inspect_dataset", "data.calculate_statistics"],
     timeout_seconds=90,
     retry_policy=RetryPolicy(max_retries=0),
-    model_policy=ModelPolicy(tier="none"),
-    token_budget=0,
+    # The model only turns a transformation request into whitelisted JSON
+    # operations; analysis stays deterministic and works without a model.
+    model_policy=ModelPolicy(tier="fast", temperature=0.0, max_output_tokens=700),
+    token_budget=2500,
     permission_policy=PermissionPolicy(granted_permissions={"files:read"}),
     routing_hints={
         "data_analysis": RoutingHints(
-            description="Analyze and visualize tabular datasets (CSV/Excel): quality, statistics, trends, charts.",
+            description=(
+                "Analyze, visualize and transform tabular datasets (CSV/Excel): quality, statistics, "
+                "trends, charts, cleaning, filtering, sorting; returns the transformed file."
+            ),
             file_extensions={".csv", ".xlsx", ".xls"},
         )
     },
 )
 async def data_analyst(task: AgentTask, ctx: AgentContext) -> AgentResult:
+    request = task.request()
+    plan = await _model_plan(request, ctx) if wants_transform(request.message) else None
     # pandas work is CPU/disk bound: keep it off the event loop.
-    return await asyncio.to_thread(data_analyst_agent, task.request(), store=ctx.run.store)
+    return await asyncio.to_thread(data_analyst_agent, request, store=ctx.run.store, plan=plan)
 
 
-def data_analyst_agent(request: ChatRequest, *, store: RuntimeStore | None = None) -> AgentResult:
+async def _model_plan(request: ChatRequest, ctx: AgentContext) -> dict[str, Any] | None:
+    """Transformation plan written by the model, or None (no model, no
+    dataset or an unusable reply) so the rule parser takes over."""
+    columns = await asyncio.to_thread(_dataset_columns, request, ctx.run.store)
+    if not columns:
+        return None
+    system, user = planner_prompt(request.message, columns)
+    try:
+        response = await ctx.llm(system=system, user=user, json_mode=True, cacheable=True, name="data_analyst.plan")
+    except Exception:
+        return None
+    parsed = parse_plan(response.text) if response else None
+    if parsed is None:
+        return None
+    operations, output_format = parsed
+    return {"operations": operations, "output_format": output_format, "planner": "model"}
+
+
+def _dataset_columns(request: ChatRequest, store: RuntimeStore) -> dict[str, str]:
+    """Column names and dtypes of the first dataset, from a small sample."""
+    for uploaded in _resolve_datasets(request, store):
+        path = Path(uploaded.storage_path or "")
+        try:
+            if path.suffix.lower() == ".csv":
+                sample = pd.read_csv(path, nrows=200, low_memory=False)
+            else:
+                sample = pd.read_excel(path, sheet_name=0, nrows=200)
+        except Exception:
+            continue
+        return {str(column): str(dtype) for column, dtype in sample.dtypes.items()}
+    return {}
+
+
+def data_analyst_agent(
+    request: ChatRequest, *, store: RuntimeStore | None = None, plan: dict[str, Any] | None = None
+) -> AgentResult:
     artifacts: list[dict[str, Any]] = []
     findings: list[str] = []
     recommendations: list[str] = []
     warnings: list[str] = []
     profiles: list[dict[str, Any]] = []
     charts: list[dict[str, Any]] = []
+    transformations: list[str] = []
+    output_files: list[dict[str, Any]] = []
+    transform_requested = plan is not None or wants_transform(request.message)
 
     datasets = _resolve_datasets(request, store or runtime_store)
     if not request.files and datasets:
@@ -93,6 +148,17 @@ def data_analyst_agent(request: ChatRequest, *, store: RuntimeStore | None = Non
             warnings.append(f"Could not read {uploaded.name}: {exc}")
             continue
 
+        file_transformations: list[str] = []
+        if transform_requested:
+            output = _transform_dataset(request, uploaded, frames, plan)
+            if output:
+                frames = output["frames"]
+                file_transformations = output["log"]
+                warnings.extend(output["warnings"])
+                if output.get("artifact"):
+                    output_files.append(output["artifact"])
+        transformations.extend(file_transformations)
+
         file_profiles = []
         for sheet_name, dataframe in frames.items():
             profile = _profile_frame(dataframe, file_name=uploaded.name, sheet_name=sheet_name)
@@ -104,7 +170,12 @@ def data_analyst_agent(request: ChatRequest, *, store: RuntimeStore | None = Non
             recommendations.extend(_profile_recommendations(profile))
 
         content = json.dumps(
-            {"question": request.message, "source_file": uploaded.name, "profiles": file_profiles},
+            {
+                "question": request.message,
+                "source_file": uploaded.name,
+                "transformations": file_transformations,
+                "profiles": file_profiles,
+            },
             indent=2,
             ensure_ascii=True,
         )
@@ -143,6 +214,19 @@ def data_analyst_agent(request: ChatRequest, *, store: RuntimeStore | None = Non
         f"Analyzed {len(profiles)} dataset table{'s' if len(profiles) != 1 else ''} "
         f"covering {total_rows:,} rows. Average data quality was {average_quality:.1f}/100."
     )
+    if output_files:
+        names = ", ".join(item["name"] for item in output_files)
+        summary = (
+            f"Applied {len(transformations)} transformation{'s' if len(transformations) != 1 else ''} "
+            f"and saved the result as {names} (download below). "
+            + summary.replace("Analyzed", "The transformed data has", 1)
+        )
+        findings[:0] = [f"Transformation: {item}" for item in transformations]
+    elif transform_requested and not transformations and plan is None:
+        warnings.append(
+            "No supported transformation was recognised in the request, so no new file was created. "
+            "Try e.g. 'remove duplicates, fill missing Age with median, sort by Salary descending'."
+        )
     if strongest:
         summary += (
             f" The strongest numeric relationship was {strongest['left']} versus "
@@ -153,16 +237,107 @@ def data_analyst_agent(request: ChatRequest, *, store: RuntimeStore | None = Non
         summary=summary,
         findings=list(dict.fromkeys(findings)),
         recommendations=list(dict.fromkeys(recommendations)),
-        artifacts=artifacts,
+        artifacts=[*output_files, *artifacts],
         warnings=list(dict.fromkeys(warnings)),
         metadata={
             "tables_analyzed": len(profiles),
+            "transformations": transformations,
+            "output_files": len(output_files),
             "rows_analyzed": total_rows,
             "average_quality_score": round(average_quality, 2),
             "profile_format": "json",
             "charts": charts[:MAX_CHARTS_TOTAL],
         },
     )
+
+
+def _transform_dataset(
+    request: ChatRequest,
+    uploaded: UploadedFile,
+    frames: dict[str, pd.DataFrame],
+    plan: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Apply the requested operations to every sheet and write the result.
+    Returns the transformed frames, a change log, warnings and the file
+    artifact, or None when there is nothing to do."""
+    if plan is not None:
+        operations = plan["operations"]
+    else:
+        columns = list(dict.fromkeys(str(column) for frame in frames.values() for column in frame.columns))
+        operations = rule_based_plan(request.message, columns)
+    output_format = (plan or {}).get("output_format") or requested_format(request.message)
+    if not operations and not output_format:
+        return None
+
+    multi_sheet = len(frames) > 1
+    transformed: dict[str, pd.DataFrame] = {}
+    log: list[str] = []
+    warnings: list[str] = []
+    for sheet_name, dataframe in frames.items():
+        frame, sheet_log, sheet_warnings = apply_operations(dataframe, operations)
+        prefix = f"{sheet_name}: " if multi_sheet else ""
+        transformed[sheet_name] = frame
+        log.extend(prefix + item for item in sheet_log)
+        warnings.extend(prefix + item for item in sheet_warnings)
+    if not log and not output_format:
+        return {"frames": frames, "log": [], "warnings": warnings}
+
+    suffix = Path(uploaded.name).suffix.lower()
+    if suffix == ".csv" and any(len(frame) >= MAX_ROWS_PROFILED for frame in frames.values()):
+        warnings.append(f"Only the first {MAX_ROWS_PROFILED:,} rows of {uploaded.name} were transformed.")
+    output_format = output_format or ("csv" if suffix == ".csv" else "xlsx")
+    if output_format == "csv" and multi_sheet:
+        warnings.append("CSV holds one table, so only the first sheet was written; ask for Excel to keep all sheets.")
+    artifact = _write_dataset(request.user_id, uploaded.name, transformed, output_format)
+    return {"frames": transformed, "log": log, "warnings": warnings, "artifact": artifact}
+
+
+def _write_dataset(
+    user_id: str, source_name: str, frames: dict[str, pd.DataFrame], output_format: str
+) -> dict[str, Any]:
+    if output_format == "csv":
+        frames = dict(list(frames.items())[:1])
+    digest = hashlib.sha256()
+    for sheet_name, frame in frames.items():
+        digest.update(sheet_name.encode("utf-8"))
+        digest.update(json.dumps([str(column) for column in frame.columns]).encode("utf-8"))
+        try:
+            digest.update(pd.util.hash_pandas_object(frame, index=False).values.tobytes())
+        except TypeError:
+            digest.update(frame.to_csv(index=False).encode("utf-8"))
+    # Content-addressed like the profile: the same result keeps the same name.
+    directory = _output_dir(user_id)
+    path = directory / f"{Path(source_name).stem[:60]}_transformed_{digest.hexdigest()[:12]}.{output_format}"
+    if output_format == "csv":
+        next(iter(frames.values())).to_csv(path, index=False)
+    else:
+        with pd.ExcelWriter(path, engine="openpyxl") as writer:
+            used: set[str] = set()
+            for sheet_name, frame in frames.items():
+                title = (sheet_name if sheet_name != "data" else "Sheet1")[:31] or "Sheet"
+                while title in used:
+                    title = f"{title[:28]}_{len(used)}"
+                used.add(title)
+                _excel_safe(frame).to_excel(writer, sheet_name=title, index=False)
+    return {
+        "name": path.name,
+        "path": f"{directory.name}/{path.name}",
+        "type": "dataset",
+        "format": output_format,
+        "rows": int(sum(len(frame) for frame in frames.values())),
+        "columns": int(max(len(frame.columns) for frame in frames.values())),
+    }
+
+
+def _excel_safe(frame: pd.DataFrame) -> pd.DataFrame:
+    """Excel cannot store timezone-aware datetimes."""
+    zoned = [column for column in frame.columns if isinstance(frame[column].dtype, pd.DatetimeTZDtype)]
+    if not zoned:
+        return frame
+    frame = frame.copy()
+    for column in zoned:
+        frame[column] = frame[column].dt.tz_localize(None)
+    return frame
 
 
 def _resolve_datasets(request: ChatRequest, store: RuntimeStore) -> list[UploadedFile]:

@@ -3000,6 +3000,59 @@ input:focus-visible,
   font-size: 13px;
 }
 
+/* Transformed dataset files (```download blocks rendered by DownloadCard) */
+.download-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 0;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-surface-raised);
+  padding: 10px 14px;
+}
+
+.download-card div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.download-card strong {
+  overflow: hidden;
+  color: var(--app-text);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.download-card span {
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.download-card button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface-muted);
+  padding: 5px 11px;
+  color: var(--app-text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.download-card button:hover:not(:disabled) { border-color: var(--app-text-muted); }
+.download-card button:disabled { cursor: progress; opacity: 0.7; }
+.download-card button:focus-visible { outline: none; box-shadow: var(--app-ring); }
+.download-card .download-card-error { color: var(--viz-negative, #e34948); }
+
 /* Data analyst charts (```chart blocks rendered by DataChart) */
 .data-chart {
   --viz-series: #2a78d6;

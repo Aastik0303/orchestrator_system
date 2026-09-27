@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.agents.catalog import load_agents
@@ -287,6 +289,32 @@ async def delete_memory(memory_id: str, principal: Principal = Depends(get_princ
     if not await asyncio.to_thread(runtime_store.delete_memory, memory_id, user_id=principal.user_id):
         raise HTTPException(status_code=404, detail="Memory was not found.")
     return {"deleted": True, "memory_id": memory_id}
+
+
+# ------------------------------------------------------------ output files
+
+ARTIFACT_MEDIA_TYPES = {
+    ".csv": "text/csv",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".json": "application/json",
+    ".md": "text/markdown",
+    ".html": "text/html",
+}
+
+
+@router.get("/artifacts/{owner}/{name}")
+async def download_artifact(owner: str, name: str, principal: Principal = Depends(get_principal)):
+    """Files written by agents (e.g. a transformed dataset). Each user's files
+    live in a folder named after a hash of their id, so a caller can only
+    fetch their own."""
+    if owner != hashlib.sha256(principal.user_id.encode()).hexdigest()[:16] or Path(name).name != name:
+        raise HTTPException(status_code=404, detail="File was not found.")
+    root = get_settings().outputs_dir.resolve()
+    path = (root / owner / name).resolve()
+    media_type = ARTIFACT_MEDIA_TYPES.get(path.suffix.lower())
+    if media_type is None or path.parent != root / owner or not path.is_file():
+        raise HTTPException(status_code=404, detail="File was not found.")
+    return FileResponse(path, media_type=media_type, filename=name)
 
 
 # ------------------------------------------------------ reports & evaluations

@@ -49,6 +49,7 @@ Resources owned by another user return 404. Limits: 429 on rate limit
 ## Reports, evaluations, workflows
 
 - `GET /reports`, `GET /reports/{id}`
+- `GET /artifacts/{owner}/{name}` — download a file an agent wrote for the caller (e.g. the data analyst's transformed CSV/XLSX, offered in responses as a ```download block); other users get 404
 - `GET /evaluations`, `GET /evaluations/{id}`, `GET /evaluations/suites/latest` (offline suite report)
 - `POST /workflows`, `GET /workflows`, `GET|PUT|DELETE /workflows/{id}`, `POST /workflows/{id}/run`
 - `GET /runtime`: dashboard snapshot

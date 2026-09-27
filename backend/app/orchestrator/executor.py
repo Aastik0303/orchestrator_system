@@ -23,6 +23,7 @@ from uuid import uuid4
 from app.agents.catalog import load_agents
 from app.agents.context import RunContext
 from app.agents.registry import AgentRegistry
+from app.agents.data_transform import render_download_blocks, strip_download_blocks
 from app.agents.visualization import charts_from_metadata, render_chart_blocks, strip_chart_blocks
 from app.config import get_settings
 from app.core.budget import Budget, ExecutionLimits
@@ -502,7 +503,7 @@ class DynamicOrchestrator:
         except Exception:
             logger.warning("conversation_load_failed")
             return []
-        turns = [{"role": item["role"], "content": strip_chart_blocks(item["content"])} for item in messages]
+        turns = [{"role": item["role"], "content": strip_download_blocks(strip_chart_blocks(item["content"]))} for item in messages]
         if turns and turns[-1]["role"] == "user" and turns[-1]["content"] == request.message:
             turns = turns[:-1]
         return turns[-6:]
@@ -598,6 +599,7 @@ def _render_direct_result(result: AgentResult | None) -> str:
         sections.append("\n".join(f"{index}. {item}" for index, item in enumerate(result.recommendations, 1)))
     if result.warnings:
         sections.append("\n".join(f"> {warning}" for warning in result.warnings))
+    sections.append(render_download_blocks(result.artifacts))
     sections.append(render_chart_blocks(charts_from_metadata(result.metadata)))
     return "\n\n".join(section for section in sections if section).strip()
 

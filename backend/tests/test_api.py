@@ -120,6 +120,30 @@ class ApiTests(ApiTestCase):
         self.assertEqual(status, "completed")
         self.assertEqual(self.client.post(f"/api/runs/{run_id}/stop", headers={"X-User-Id": user}).status_code, 409)
 
+    def test_data_transformation_returns_a_downloadable_file_only_to_its_owner(self):
+        import json
+
+        user = _env.unique("transform")
+        csv = b"name,age,salary\na,25,100\nb,40,300\nb,40,300\nc,,200\n"
+        response = self.client.post(
+            "/api/chat",
+            data={"message": "remove duplicates and sort by salary descending"},
+            files={"files": ("people.csv", csv, "text/csv")},
+            headers={"X-User-Id": user},
+        ).json()
+        self.assertEqual(response["route"]["primary_agent"], "data_analyst")
+        block = response["response"].split("```download\n", 1)[1].split("\n```", 1)[0]
+        spec = json.loads(block)
+        self.assertEqual(spec["rows"], 3)
+        download = self.client.get(f"/api/artifacts/{spec['path']}", headers={"X-User-Id": user})
+        self.assertEqual(download.status_code, 200)
+        self.assertEqual(download.text.replace("\r\n", "\n"), "name,age,salary\nb,40.0,300\nc,,200\na,25.0,100\n")
+        intruder = self.client.get(f"/api/artifacts/{spec['path']}", headers={"X-User-Id": _env.unique("intruder")})
+        self.assertEqual(intruder.status_code, 404)
+        owner = spec["path"].split("/", 1)[0]
+        traversal = self.client.get(f"/api/artifacts/{owner}/..%2F..%2Fruntime.db", headers={"X-User-Id": user})
+        self.assertEqual(traversal.status_code, 404)
+
     def test_invalid_agent_override_is_rejected(self):
         response = self.chat("hi", _env.unique("api"), agent_override="supervisor")
         self.assertEqual(response.status_code, 422)
